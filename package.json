@@ -1,0 +1,12 @@
+{
+  "name": "sih-26089",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SIH 2026 Problem Statement 26089 — Gig Worker platform (mobile app, admin dashboard, backend, shared domain logic).",
+  "scripts": {
+    "mobile": "npm --prefix mobile run start",
+    "mobile:android": "npm --prefix mobile run android",
+    "mobile:ios": "npm --prefix mobile run ios",
+    "mobile:web": "npm --prefix mobile run web"
+  }
+}
