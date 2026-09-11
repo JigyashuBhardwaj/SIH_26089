@@ -12,3 +12,8 @@ or throws an `Error`. Not secure, not persisted — a placeholder with the
 exact shape real backend calls will have, so `features/auth` doesn't need
 to change when Phase 4 replaces this file's internals with real HTTP
 requests.
+
+**`serviceCatalog.ts`** (Phase 3A) — the predefined service list shown on
+Book a Service, plus `searchServices()`/`getPopularServices()`. Same
+mock-now-real-later pattern as `authService.ts`: it will be replaced by a
+"GET /services" call later without the screen needing to change.

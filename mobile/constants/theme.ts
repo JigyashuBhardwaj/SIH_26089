@@ -32,6 +32,11 @@ export const colors = {
 
   skyline: '#B9C9DE',
   hardHat: '#FBC02D',
+
+  // Status colors (locked)
+  warning: '#F59E0B',
+  error: '#D32F2F',
+  success: '#2E7D32',
 } as const;
 
 export const spacing = {

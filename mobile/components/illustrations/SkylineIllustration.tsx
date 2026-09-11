@@ -6,6 +6,8 @@ interface SkylineIllustrationProps {
   /** Bias the silhouette tones toward the User (blue) or Worker (green) identity. */
   tone?: 'blue' | 'green' | 'mixed';
   height?: number;
+  /** Set false for a compact skyline-only banner (no worker figures in front). Defaults to true, unchanged for existing screens. */
+  showFigures?: boolean;
 }
 
 const BUILDING_HEIGHTS = [34, 58, 42, 72, 50, 64, 38, 56, 46];
@@ -20,7 +22,7 @@ const BUILDING_HEIGHTS = [34, 58, 42, 72, 50, 64, 38, 56, 46];
  * and weighted to read as a real illustrated section, not a thin
  * decorative strip.
  */
-export function SkylineIllustration({ tone = 'mixed', height = 132 }: SkylineIllustrationProps) {
+export function SkylineIllustration({ tone = 'mixed', height = 132, showFigures = true }: SkylineIllustrationProps) {
   const figureColor = tone === 'blue' ? colors.blue : tone === 'green' ? colors.green : colors.primaryBlue;
 
   return (
@@ -37,13 +39,15 @@ export function SkylineIllustration({ tone = 'mixed', height = 132 }: SkylineIll
         ))}
       </View>
       <View style={styles.groundLine} />
-      <View style={styles.figures}>
-        <WorkerSilhouette color={figureColor} height={46} hardHat />
-        <WorkerSilhouette color={figureColor} height={38} />
-        <WorkerSilhouette color={figureColor} height={50} hardHat hatColor={colors.hardHat} />
-        <WorkerSilhouette color={figureColor} height={36} />
-        <WorkerSilhouette color={figureColor} height={44} hardHat />
-      </View>
+      {showFigures ? (
+        <View style={styles.figures}>
+          <WorkerSilhouette color={figureColor} height={46} hardHat />
+          <WorkerSilhouette color={figureColor} height={38} />
+          <WorkerSilhouette color={figureColor} height={50} hardHat hatColor={colors.hardHat} />
+          <WorkerSilhouette color={figureColor} height={36} />
+          <WorkerSilhouette color={figureColor} height={44} hardHat />
+        </View>
+      ) : null}
     </View>
   );
 }

@@ -12,3 +12,9 @@ logic — those live in `features/`, `services/`, and `../shared/`.
   by both home screens.
 - **ComingSoonDialog.tsx** — the single reusable "Coming Soon" modal used
   by every non-functional feature across both flows.
+- **ScreenHeader.tsx** — back + KarmanyaLogo + ProfileMenu row, used on
+  sub-screens below Home that need a back action (e.g. Book a Service).
+- **BottomNavBar.tsx** — the persistent bottom tab bar on User booking-flow
+  screens.
+- **ServiceCard.tsx** — grid card (Popular Services) and list card (search
+  results) for the predefined service catalogue.
