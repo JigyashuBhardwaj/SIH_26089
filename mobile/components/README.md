@@ -12,6 +12,8 @@ logic — those live in `features/`, `services/`, and `../shared/`.
   by both home screens.
 - **ComingSoonDialog.tsx** — the single reusable "Coming Soon" modal used
   by every non-functional feature across both flows.
+- **ConfirmDialog.tsx** — generic yes/no confirmation modal (distinct from
+  ComingSoonDialog's single dismiss action); used by Cancel Request.
 - **ScreenHeader.tsx** — back + KarmanyaLogo + ProfileMenu row, used on
   sub-screens below Home that need a back action (e.g. Book a Service).
 - **BottomNavBar.tsx** — the persistent bottom tab bar on User booking-flow
