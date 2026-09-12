@@ -16,10 +16,13 @@ export const FREE_CANCELLATION_WINDOW_HOURS = 2;
 
 /**
  * Whether a requested service time satisfies the minimum lead time.
- * Not implemented yet — see MIN_BOOKING_LEAD_TIME_HOURS.
+ * `bookingTime` is when the request is being made (normally `new Date()`);
+ * `requestedServiceTime` is the date/time the person picked. The boundary
+ * is inclusive: exactly MIN_BOOKING_LEAD_TIME_HOURS from now is valid.
  */
-export function isServiceTimeValid(_bookingTime: Date, _requestedServiceTime: Date): boolean {
-  throw new Error('isServiceTimeValid is not implemented yet (Phase 3).');
+export function isServiceTimeValid(bookingTime: Date, requestedServiceTime: Date): boolean {
+  const minValidTime = bookingTime.getTime() + MIN_BOOKING_LEAD_TIME_HOURS * 60 * 60 * 1000;
+  return requestedServiceTime.getTime() >= minValidTime;
 }
 
 /**
