@@ -1,0 +1,119 @@
+.eyebrow {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.title {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--color-text-primary);
+  margin: 0 0 24px;
+}
+
+.gridHeader {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.demoBadge {
+  background: var(--color-green-tint);
+  color: var(--color-green);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 36px;
+}
+
+.section {
+  max-width: 760px;
+}
+
+.sectionHeaderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.sectionTitle {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.addAssociationButton {
+  background: var(--color-white);
+  border: 1px solid var(--color-action-blue);
+  color: var(--color-action-blue);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 8px 16px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.addAssociationButton:hover {
+  background: var(--color-blue-tint);
+}
+
+.associationList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.associationCard {
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 18px 20px;
+}
+
+.associationHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.associationName {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--color-text-primary);
+}
+
+.workerBadge {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-green);
+  background: var(--color-green-tint);
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+
+.associationServices {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

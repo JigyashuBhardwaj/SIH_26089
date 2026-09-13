@@ -1,0 +1,41 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.markRow {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.markLeft {
+  margin-right: -8px;
+  transform: rotate(-8deg);
+}
+
+.markRight {
+  margin-left: -8px;
+  transform: rotate(8deg);
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--color-text-primary);
+  letter-spacing: 1px;
+}
+
+.titleLarge {
+  font-size: 26px;
+}
+
+.tagline {
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}

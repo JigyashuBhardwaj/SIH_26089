@@ -1,0 +1,40 @@
+.card {
+  position: relative;
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 20px 20px 18px 24px;
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.accentBar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+}
+
+.accentBlue {
+  background: var(--color-action-blue);
+}
+
+.accentGreen {
+  background: var(--color-green);
+}
+
+.value {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--color-text-primary);
+}
+
+.label {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
