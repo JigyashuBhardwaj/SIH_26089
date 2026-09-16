@@ -1,8 +1,11 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { DashboardPage } from './pages/DashboardPage';
+import { AssociationsPage } from './pages/AssociationsPage';
 import { ComingSoonPage } from './pages/ComingSoonPage';
 import { LoginPage } from './pages/LoginPage';
+import { WorkerDetailPage } from './pages/WorkerDetailPage';
+import { WorkersPage } from './pages/WorkersPage';
 
 /**
  * Phase 4A route map: login + one protected dashboard route (role-based
@@ -35,7 +38,15 @@ export default function App() {
         path="/workers"
         element={
           <ProtectedRoute>
-            <ComingSoonPage title="Workers" />
+            <WorkersPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/workers/:workerId"
+        element={
+          <ProtectedRoute>
+            <WorkerDetailPage />
           </ProtectedRoute>
         }
       />
@@ -43,7 +54,7 @@ export default function App() {
         path="/associations"
         element={
           <ProtectedRoute>
-            <ComingSoonPage title="Associations" />
+            <AssociationsPage />
           </ProtectedRoute>
         }
       />

@@ -18,6 +18,9 @@ export interface AssociationAccount {
   services: string[];
   /** Same demo figure used on the mobile app's Select Association screen, for consistency. */
   workerCount: string;
+  location: string;
+  rating: number;
+  coverage: string;
 }
 
 export interface FederationAccount {
@@ -38,6 +41,9 @@ export const DEMO_ACCOUNTS: DemoAccount[] = [
     associationName: 'Dhanbad Skilled Workers Association',
     services: ['Plumbing', 'Electrical', 'Carpentry', 'Masonry'],
     workerCount: '120+',
+    location: 'Dhanbad, Jharkhand',
+    rating: 4.7,
+    coverage: 'Dhanbad city & nearby areas',
   },
   {
     role: 'ASSOCIATION_ADMIN',
@@ -47,6 +53,9 @@ export const DEMO_ACCOUNTS: DemoAccount[] = [
     associationName: 'Dhanbad General Workers Association',
     services: ['Plumbing', 'Painting', 'Cleaning', 'Gardening', 'General Helpers'],
     workerCount: '95+',
+    location: 'Dhanbad, Jharkhand',
+    rating: 4.5,
+    coverage: 'Dhanbad city & nearby areas',
   },
   {
     role: 'FEDERATION_ADMIN',

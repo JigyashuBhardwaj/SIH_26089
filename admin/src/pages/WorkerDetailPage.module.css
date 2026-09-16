@@ -1,0 +1,182 @@
+.backButton {
+  background: none;
+  border: none;
+  color: var(--color-action-blue);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: 20px;
+}
+
+.headerCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 24px 28px;
+  margin-bottom: 24px;
+  box-shadow: var(--shadow-card);
+}
+
+.name {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--color-text-primary);
+  margin: 0 0 4px;
+}
+
+.workerId {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.statusBadge {
+  padding: 5px 14px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.badgeGreen {
+  background: var(--color-green-tint);
+  color: var(--color-green);
+}
+
+.badgeGrey {
+  background: var(--color-background);
+  color: var(--color-text-secondary);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.section {
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 20px 22px;
+}
+
+.sectionFull {
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 20px 22px;
+}
+
+.sectionTitle {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--color-text-primary);
+  margin: 0 0 14px;
+}
+
+.fieldList {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.field dt {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 2px;
+}
+
+.field dd {
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  background: var(--color-blue-tint);
+  color: var(--color-action-blue);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+}
+
+.emptyText {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.assignmentsTableWrap {
+  overflow-x: auto;
+}
+
+.assignmentsTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.assignmentsTable th {
+  text-align: left;
+  padding: 10px 14px;
+  background: var(--color-background);
+  color: var(--color-text-secondary);
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.assignmentsTable td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+}
+
+.assignmentsTable tr:last-child td {
+  border-bottom: none;
+}
+
+.notFoundCard {
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 40px;
+  text-align: center;
+}
+
+.notFoundTitle {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--color-text-primary);
+  margin: 0 0 4px;
+}
+
+.notFoundBody {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
