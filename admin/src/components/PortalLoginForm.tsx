@@ -1,13 +1,28 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ComingSoonModal } from '../components/ComingSoonModal';
-import { KarmanyaLogo } from '../components/KarmanyaLogo';
-import { useAuth } from '../features/auth';
-import styles from './LoginPage.module.css';
+import { ComingSoonModal } from './ComingSoonModal';
+import { KarmanyaLogo } from './KarmanyaLogo';
+import styles from './PortalLoginForm.module.css';
 
-export function LoginPage() {
+interface PortalLoginFormProps {
+  portalTitle: string;
+  idFieldLabel: string;
+  demoHint: string;
+  /** Throws with a user-facing message on invalid credentials. */
+  onLogin: (loginId: string, password: string) => void;
+  showRegisterLink?: boolean;
+}
+
+/**
+ * The shared visual/behavioral shell for both dedicated login pages
+ * (Federation and Association): logo, portal title, ID + password fields
+ * (with the existing show/hide eye), Forgot Password, Login, an optional
+ * Register link, and a back-to-portal-selection link. Only the field
+ * label, portal title, demo hint text, login handler, and whether the
+ * register link appears differ between the two pages.
+ */
+export function PortalLoginForm({ portalTitle, idFieldLabel, demoHint, onLogin, showRegisterLink }: PortalLoginFormProps) {
   const navigate = useNavigate();
-  const { login } = useAuth();
 
   const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
@@ -25,7 +40,7 @@ export function LoginPage() {
     }
 
     try {
-      login(loginId.trim(), password);
+      onLogin(loginId.trim(), password);
       navigate('/dashboard', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid ID or password.');
@@ -38,11 +53,11 @@ export function LoginPage() {
         <div className={styles.brandRow}>
           <KarmanyaLogo size="large" />
         </div>
-        <p className={styles.subtitle}>Association &amp; Federation Portal</p>
+        <p className={styles.subtitle}>{portalTitle}</p>
 
         <form className={styles.form} onSubmit={handleSubmit}>
           <label className={styles.field}>
-            <span className={styles.fieldLabel}>Association / Admin ID</span>
+            <span className={styles.fieldLabel}>{idFieldLabel}</span>
             <input
               className={styles.input}
               type="text"
@@ -74,11 +89,7 @@ export function LoginPage() {
             </div>
           </label>
 
-          <button
-            type="button"
-            className={styles.forgotPasswordLink}
-            onClick={() => setComingSoonOpen(true)}
-          >
+          <button type="button" className={styles.forgotPasswordLink} onClick={() => setComingSoonOpen(true)}>
             Forgot Password?
           </button>
 
@@ -88,20 +99,20 @@ export function LoginPage() {
             Login
           </button>
 
-          <button
-            type="button"
-            className={styles.registerFederationLink}
-            onClick={() => setComingSoonOpen(true)}
-          >
-            Register as a Federation
-          </button>
+          {showRegisterLink ? (
+            <button type="button" className={styles.secondaryLink} onClick={() => setComingSoonOpen(true)}>
+              Register as a Federation
+            </button>
+          ) : null}
         </form>
 
+        <button type="button" className={styles.backLink} onClick={() => navigate('/')}>
+          ← Back to portal selection
+        </button>
+
         <div className={styles.demoHint}>
-          <p className={styles.demoHintTitle}>Demo accounts</p>
-          <p>dhanbad_skilled / skilled123</p>
-          <p>dhanbad_general / general123</p>
-          <p>federation_admin / federation123</p>
+          <p className={styles.demoHintTitle}>Demo account</p>
+          <p>{demoHint}</p>
         </div>
       </div>
 

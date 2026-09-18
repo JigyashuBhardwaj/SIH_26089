@@ -75,12 +75,28 @@ export function getAllAssociations(): AssociationAccount[] {
 }
 
 /**
- * Looks up a demo account by login ID + password. Throws with the exact
- * user-facing message the login screen should show — never reveals
- * whether the ID or the password was the specific problem.
+ * Same as the old generic lookup, but scoped to Federation accounts
+ * only — used by the dedicated Federation Login page so a correct
+ * Association ID/password typed there is still rejected as invalid, not
+ * silently logged in as the wrong portal.
  */
-export function findAccount(loginId: string, password: string): DemoAccount {
-  const account = DEMO_ACCOUNTS.find((entry) => entry.loginId === loginId && entry.password === password);
+export function findFederationAccount(loginId: string, password: string): FederationAccount {
+  const account = DEMO_ACCOUNTS.find(
+    (entry): entry is FederationAccount =>
+      entry.role === 'FEDERATION_ADMIN' && entry.loginId === loginId && entry.password === password
+  );
+  if (!account) {
+    throw new Error('Invalid ID or password.');
+  }
+  return account;
+}
+
+/** Same as `findFederationAccount`, but scoped to Association accounts only. */
+export function findAssociationAccount(loginId: string, password: string): AssociationAccount {
+  const account = DEMO_ACCOUNTS.find(
+    (entry): entry is AssociationAccount =>
+      entry.role === 'ASSOCIATION_ADMIN' && entry.loginId === loginId && entry.password === password
+  );
   if (!account) {
     throw new Error('Invalid ID or password.');
   }

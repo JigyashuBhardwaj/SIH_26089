@@ -1,21 +1,25 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { DashboardPage } from './pages/DashboardPage';
+import { AssociationLoginPage } from './pages/AssociationLoginPage';
 import { AssociationsPage } from './pages/AssociationsPage';
 import { ComingSoonPage } from './pages/ComingSoonPage';
-import { LoginPage } from './pages/LoginPage';
+import { FederationLoginPage } from './pages/FederationLoginPage';
+import { PortalSelectionPage } from './pages/PortalSelectionPage';
 import { WorkerDetailPage } from './pages/WorkerDetailPage';
 import { WorkersPage } from './pages/WorkersPage';
 
 /**
- * Phase 4A route map: login + one protected dashboard route (role-based
- * content, see DashboardPage) + four Coming Soon placeholders for the
- * nav items that aren't built yet. Everything else falls back to login.
+ * Phase 4C route map: Portal Selection is the entry point (`/`), branching
+ * into two dedicated login routes rather than one generic login form.
+ * Everything past login is unchanged from Phase 4A/4B.
  */
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<LoginPage />} />
+      <Route path="/" element={<PortalSelectionPage />} />
+      <Route path="/login/federation" element={<FederationLoginPage />} />
+      <Route path="/login/association" element={<AssociationLoginPage />} />
 
       <Route
         path="/dashboard"
