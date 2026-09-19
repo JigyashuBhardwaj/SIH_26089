@@ -8,7 +8,7 @@
  * agree on a contract before either is built. This is deliberately NOT
  * an AI/ML model — it stays a deterministic, inspectable algorithm.
  */
-import type { Worker, Booking } from '../types';
+import type { Worker, ServiceRequest } from '../types';
 
 export interface MatchingCriteria {
   availability: boolean;
@@ -17,9 +17,9 @@ export interface MatchingCriteria {
 }
 
 /**
- * Ranks candidate workers for a booking, best match first.
+ * Ranks candidate workers for a service request, best match first.
  * Not implemented yet — see Phase 5.
  */
-export function rankCandidateWorkers(_booking: Booking, _candidates: Worker[]): Worker[] {
+export function rankCandidateWorkers(_request: ServiceRequest, _candidates: Worker[]): Worker[] {
   throw new Error('rankCandidateWorkers is not implemented yet (Phase 5).');
 }

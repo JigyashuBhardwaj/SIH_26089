@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
-import type { BookingStatus } from '@shared/types';
+import type { ServiceRequestStatus } from '@shared/types';
 
 /**
  * The exact dummy address used for every request in this prototype —
@@ -24,7 +24,7 @@ export interface LocalServiceRequest {
   associationId: string;
   associationName: string;
   address: string;
-  status: BookingStatus;
+  status: ServiceRequestStatus;
   createdAt: string;
 }
 
