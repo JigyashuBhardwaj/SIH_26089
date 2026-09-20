@@ -1,0 +1,1 @@
+"""Karmanya backend application package."""
