@@ -79,6 +79,8 @@ from app.models import (  # noqa: E402
     AccountRole,
     Association,
     Federation,
+    Service,
+    UserProfile,
     Worker,
     WorkerStatus,
 )
@@ -230,6 +232,48 @@ def make_worker(db_session):
         return worker
 
     return _make_worker
+
+
+@pytest.fixture()
+def make_service(db_session):
+    """Factory fixture: create a temporary `Service` row for this test (Phase 5E-B)."""
+
+    def _make_service(
+        *,
+        name: str | None = None,
+        category: str = "General",
+        is_active: bool = True,
+    ) -> Service:
+        service = Service(
+            name=name or f"Service {uuid.uuid4().hex[:8]}",
+            category=category,
+            is_active=is_active,
+        )
+        db_session.add(service)
+        db_session.flush()
+        db_session.refresh(service)
+        return service
+
+    return _make_service
+
+
+@pytest.fixture()
+def make_user_profile(db_session):
+    """Factory fixture: create a temporary `UserProfile` row for this test (Phase 5E-B)."""
+
+    def _make_user_profile(
+        *,
+        account_id,
+        full_name: str = "Test User",
+        phone: str | None = "9876543210",
+    ) -> UserProfile:
+        profile = UserProfile(account_id=account_id, full_name=full_name, phone=phone)
+        db_session.add(profile)
+        db_session.flush()
+        db_session.refresh(profile)
+        return profile
+
+    return _make_user_profile
 
 
 @pytest.fixture()
