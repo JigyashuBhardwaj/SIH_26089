@@ -1,0 +1,9 @@
+# Test-only dependencies (Phase 5E-A). Kept separate from requirements.txt
+# so production installs never pull in test tooling.
+#
+# httpx2 is not a typo: this project's pinned Starlette version (1.7.0,
+# via fastapi==0.141.1) requires a package literally named `httpx2` for
+# `starlette.testclient.TestClient` / `fastapi.testclient.TestClient` to
+# work, rather than the traditional `httpx` package.
+pytest==9.1.1
+httpx2==2.13.1

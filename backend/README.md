@@ -9,16 +9,19 @@ Stack: **Python, FastAPI, SQLAlchemy, PostgreSQL** — see
 `KARMANYA_BACKEND_ARCHITECTURE.md` for the full architecture this backend
 is being built against.
 
-## Status: Phase 5D — Authentication + Authorization
+## Status: Phase 5E-A — API/Testing Foundation
 
-Phase 5B (application skeleton) and Phase 5C (domain database schema, nine
-tables) are done and unchanged. Phase 5D adds **authentication and
-authorization only**, on top of the existing Phase 5C `Account` table:
-`POST /auth/login`, `GET /auth/me`, JWT issuance/verification, and
-reusable dependencies for future protected routes. **No business/domain
-API routes, no signup, no password reset, no OTP, no seed/demo data, and
-no schema changes** — the Phase 5C schema was sufficient as-is
-(`Account.password_hash` already existed, unused, for exactly this).
+Phase 5B (application skeleton), Phase 5C (domain database schema, nine
+tables), and Phase 5D (authentication + authorization) are done and
+functionally unchanged. Phase 5E-A adds the **foundation** future domain
+APIs will build on — organization for future routers, shared Pydantic
+schema/error/pagination conventions, and a permanent, isolated automated
+test suite that converts the earlier Phase 5D manual verification into
+repeatable pytest tests. **No business/domain endpoints, no schema
+changes, no seed/demo data** — see "Testing" below.
+
+`POST /auth/login`, `GET /auth/me`, JWT issuance/verification, and the
+reusable auth dependencies described below are unchanged from Phase 5D.
 
 ```
 backend/
@@ -46,19 +49,35 @@ backend/
 │   │   ├── security.py         # hash_password/verify_password (Argon2id), create/decode_access_token (JWT)
 │   │   ├── dependencies.py     # get_current_account, require_role — reusable, not duplicated per-route
 │   │   └── scope.py            # organization-scope foundations for future routes (see below)
-│   ├── schemas/                 # Phase 5D: typed request/response models
+│   ├── schemas/                 # typed request/response models
 │   │   ├── __init__.py
-│   │   └── auth.py             # LoginRequest, AccountPublic (never password_hash), LoginResponse
-│   └── api/                     # Phase 5D: routers
+│   │   ├── auth.py             # Phase 5D: LoginRequest, AccountPublic (never password_hash), LoginResponse
+│   │   └── pagination.py       # Phase 5E-A: PaginationParams/PaginatedResponse foundation (unwired)
+│   └── api/                     # routers
 │       ├── __init__.py
-│       └── auth.py             # POST /auth/login, GET /auth/me
+│       ├── auth.py             # Phase 5D: POST /auth/login, GET /auth/me
+│       ├── errors.py           # Phase 5E-A: shared 400/404/409 helpers (unwired)
+│       ├── users.py            # Phase 5E-A: placeholder router, no endpoints, not mounted
+│       ├── workers.py          # Phase 5E-A: placeholder router, no endpoints, not mounted
+│       ├── associations.py     # Phase 5E-A: placeholder router, no endpoints, not mounted
+│       ├── federation.py       # Phase 5E-A: placeholder router, no endpoints, not mounted
+│       └── requests.py         # Phase 5E-A: placeholder router, no endpoints, not mounted
 ├── alembic/
 │   ├── env.py                 # wired to app.config + app.database.Base.metadata
 │   ├── script.py.mako
 │   └── versions/
 │       └── 45f5b1be1f76_initial_domain_models.py   # creates all 9 tables (Phase 5C; unchanged)
 ├── alembic.ini
+├── tests/                       # Phase 5E-A: pytest suite (see "Testing" below)
+│   ├── conftest.py              # isolated test DB/session, TestClient, account/scope factories
+│   ├── test_auth_security.py    # password hashing + JWT contract (valid/malformed/bad-sig/expired/missing-claims)
+│   ├── test_auth_login.py       # POST /auth/login (valid, wrong password, unknown login_id, inactive)
+│   ├── test_auth_me.py          # GET /auth/me (valid, missing/invalid token, inactive, no password_hash leak)
+│   ├── test_authorization.py    # require_role (permitted / wrong role)
+│   └── test_scope.py            # association/federation/worker scope helpers
+├── pytest.ini
 ├── requirements.txt
+├── requirements-dev.txt         # Phase 5E-A: pytest, httpx2 (test-only, separate from requirements.txt)
 ├── .env.example
 └── README.md
 ```
@@ -107,6 +126,84 @@ ACCESS_TOKEN_EXPIRE_MINUTES=30   # optional, defaults to 30 if omitted
 ```
 
 Generate a real secret with, e.g., `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`.
+
+### API/error/pagination conventions (Phase 5E-A)
+
+Foundation only — nothing below is wired into a business endpoint yet:
+
+- `app/api/errors.py` — shared helpers for the status codes that don't
+  already have an established home: `bad_request()` (400), `not_found()`
+  (404), `conflict()` (409). 401/403 remain exactly where Phase 5D put
+  them (`app/auth/dependencies.py`, `app/auth/scope.py`); 422 is automatic
+  via Pydantic request validation. This is deliberately not a custom
+  exception framework — every route still raises a plain FastAPI
+  `HTTPException`, same as before.
+- `app/schemas/pagination.py` — `PaginationParams` (1-indexed `page`,
+  `page_size` bounded to 1–100, default 20) and a generic
+  `PaginatedResponse` envelope, for future list endpoints to share
+  instead of each inventing its own bounds.
+- `app/api/users.py` / `workers.py` / `associations.py` / `federation.py`
+  / `requests.py` — placeholder `APIRouter`s with no endpoints, not
+  included in `app/main.py`. They exist only so a later phase has an
+  obvious file to add real routes to; they currently have zero effect on
+  the running application.
+
+### Testing (Phase 5E-A)
+
+A permanent, automated pytest suite lives in `backend/tests/`. It
+converts the earlier Phase 5D manual verification into repeatable,
+automated tests and **must never run against the real development
+database** (`karmanya`).
+
+**1. Create an isolated test database** (once), separate from the `karmanya`
+development database:
+
+```bash
+sudo -u postgres psql -c "CREATE DATABASE karmanya_test OWNER karmanya;"
+# or, without sudo/a postgres superuser role available:
+createdb -O karmanya karmanya_test
+```
+
+**2. Install test dependencies** (in addition to `requirements.txt`):
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+**3. Set `TEST_DATABASE_URL` and run pytest** from inside `backend/`:
+
+```bash
+export TEST_DATABASE_URL=postgresql://karmanya:karmanya@localhost:5432/karmanya_test
+pytest
+```
+
+`TEST_DATABASE_URL` is required — `tests/conftest.py` fails immediately,
+before any test runs, if it's unset, or if it happens to resolve to the
+same value as the development `DATABASE_URL` (from an exported env var or
+`backend/.env`). This is a hard safety check, not just documentation: the
+suite forces `DATABASE_URL` to `TEST_DATABASE_URL` before importing any
+`app.*` module, so even `app/database.py`'s module-level SQLAlchemy engine
+is bound to the test database, never the development one.
+
+The test database's schema is created directly from the SQLAlchemy models
+(`Base.metadata.create_all`) at the start of the test run and dropped at
+the end — deliberately **not** via Alembic, keeping the test suite fully
+decoupled from the production migration tooling. Each individual test
+runs inside a transaction that is rolled back afterward, so tests never
+leak data into one another and no seed/demo data is ever left behind.
+
+What's covered: password hashing, the JWT contract (valid / malformed /
+invalid-signature / expired / missing-claims — tested directly against
+`app/auth/security.py`), `/auth/login` (valid / wrong password / unknown
+login_id / inactive account — all indistinguishable, per the Phase 5D
+generic-401 design), `/auth/me` (valid / missing / malformed token /
+deactivated-after-issuance / never exposes `password_hash`),
+`require_role` (permitted / wrong role), and the association/federation/
+worker scope helpers in `app/auth/scope.py`.
+
+`backend/.env` (the developer's own local configuration) is never read or
+modified by the test suite beyond the one-time comparison used for the
+identical-URL safety check above.
 
 ### Running / testing auth locally
 
