@@ -9,48 +9,121 @@ Stack: **Python, FastAPI, SQLAlchemy, PostgreSQL** — see
 `KARMANYA_BACKEND_ARCHITECTURE.md` for the full architecture this backend
 is being built against.
 
-## Status: Phase 5C — Domain Database Models
+## Status: Phase 5D — Authentication + Authorization
 
-Phase 5B (application skeleton: FastAPI app, configuration, SQLAlchemy
-engine/session wiring) is done and unchanged. Phase 5C adds the core
-domain **database schema** — SQLAlchemy models for the nine locked
-entities plus an Alembic migration that creates them — and nothing else:
-**no authentication, no API routes for these entities, no matching/
-assignment business logic, and no seed/demo data.** `GET /health` is
-still the only HTTP endpoint; nothing in `app/models/` is wired into
-`app/main.py` yet.
+Phase 5B (application skeleton) and Phase 5C (domain database schema, nine
+tables) are done and unchanged. Phase 5D adds **authentication and
+authorization only**, on top of the existing Phase 5C `Account` table:
+`POST /auth/login`, `GET /auth/me`, JWT issuance/verification, and
+reusable dependencies for future protected routes. **No business/domain
+API routes, no signup, no password reset, no OTP, no seed/demo data, and
+no schema changes** — the Phase 5C schema was sufficient as-is
+(`Account.password_hash` already existed, unused, for exactly this).
 
 ```
 backend/
 ├── app/
 │   ├── __init__.py
-│   ├── main.py               # FastAPI app, CORS, GET /health
-│   ├── config.py              # Settings loaded from environment variables
+│   ├── main.py               # FastAPI app, CORS, GET /health, mounts auth router
+│   ├── config.py              # Settings: DB, CORS, + Phase 5D JWT config
 │   ├── database.py            # SQLAlchemy engine/session, Base
-│   └── models/                 # Phase 5C: domain schema only, no routes/business logic
-│       ├── __init__.py         # imports every model so Base.metadata sees all 9 tables
-│       ├── enums.py            # AccountRole, WorkerStatus, ServiceRequestStatus, AssignmentStatus
-│       ├── mixins.py           # TimestampMixin (created_at/updated_at)
-│       ├── type_decorators.py  # str_enum_column(): VARCHAR+CHECK, not a native PG enum
-│       ├── federation.py
-│       ├── association.py
-│       ├── account.py
-│       ├── user_profile.py
-│       ├── worker.py
-│       ├── service.py
-│       ├── worker_skill.py
-│       ├── service_request.py
-│       └── assignment.py
+│   ├── models/                 # Phase 5C: domain schema only, no routes/business logic
+│   │   ├── __init__.py         # imports every model so Base.metadata sees all 9 tables
+│   │   ├── enums.py            # AccountRole, WorkerStatus, ServiceRequestStatus, AssignmentStatus
+│   │   ├── mixins.py           # TimestampMixin (created_at/updated_at)
+│   │   ├── type_decorators.py  # str_enum_column(): VARCHAR+CHECK, not a native PG enum
+│   │   ├── federation.py
+│   │   ├── association.py
+│   │   ├── account.py
+│   │   ├── user_profile.py
+│   │   ├── worker.py
+│   │   ├── service.py
+│   │   ├── worker_skill.py
+│   │   ├── service_request.py
+│   │   └── assignment.py
+│   ├── auth/                   # Phase 5D: password hashing, JWT, auth dependencies
+│   │   ├── __init__.py
+│   │   ├── security.py         # hash_password/verify_password (Argon2id), create/decode_access_token (JWT)
+│   │   ├── dependencies.py     # get_current_account, require_role — reusable, not duplicated per-route
+│   │   └── scope.py            # organization-scope foundations for future routes (see below)
+│   ├── schemas/                 # Phase 5D: typed request/response models
+│   │   ├── __init__.py
+│   │   └── auth.py             # LoginRequest, AccountPublic (never password_hash), LoginResponse
+│   └── api/                     # Phase 5D: routers
+│       ├── __init__.py
+│       └── auth.py             # POST /auth/login, GET /auth/me
 ├── alembic/
 │   ├── env.py                 # wired to app.config + app.database.Base.metadata
 │   ├── script.py.mako
 │   └── versions/
-│       └── 45f5b1be1f76_initial_domain_models.py   # creates all 9 tables
+│       └── 45f5b1be1f76_initial_domain_models.py   # creates all 9 tables (Phase 5C; unchanged)
 ├── alembic.ini
 ├── requirements.txt
 ├── .env.example
 └── README.md
 ```
+
+### Authentication (Phase 5D)
+
+- `POST /auth/login` — body `{"login_id": "...", "password": "..."}`. On
+  success, returns `{"access_token": "...", "token_type": "bearer",
+  "account": {...}}`. On any failure (unknown `login_id`, wrong password,
+  or an inactive account), returns `401` with the same generic
+  `"Invalid login credentials"` message — deliberately not distinguishable,
+  so the endpoint can't be used to enumerate which login_ids exist or
+  learn *why* a login failed.
+- `GET /auth/me` — requires `Authorization: Bearer <token>`; returns the
+  caller's own account information. Never returns `password_hash` (the
+  `AccountPublic` response model has no such field at all).
+- Passwords are hashed with Argon2id (`argon2-cffi`), never stored or
+  logged in plaintext, never returned by any response, and never placed
+  in the JWT.
+- Access tokens are JWTs (HS256, `PyJWT`) containing only `sub` (Account
+  UUID), `role`, `iat`, `exp` — no organization IDs, no password/hash.
+  There is no refresh token in Phase 5D; a token is simply valid until it
+  expires (`ACCESS_TOKEN_EXPIRE_MINUTES`, default 30) or the account is
+  deactivated (checked against the live database on every authenticated
+  request — deactivating an account takes effect immediately, without any
+  token-revocation mechanism).
+- `app/auth/dependencies.py` exposes `get_current_account` (the one place
+  that turns a Bearer token into a verified `Account`, re-checking
+  existence and `is_active` against the database every time) and
+  `require_role(*roles)` (server-side role enforcement — a client's own
+  claimed role is never trusted). Both are meant to be reused by future
+  protected routes, not reimplemented per-endpoint.
+- `app/auth/scope.py` provides organization-scope **foundations** for
+  future routes (not wired into any endpoint yet, since Phase 5D defines
+  no business routes): deriving a WORKER's association from
+  `Account -> Worker -> Association`, and confirming an
+  `ASSOCIATION_ADMIN`/`FEDERATION_ADMIN` account's own association/
+  federation membership — always from the authenticated account's own
+  database relationships, never from a client-supplied id.
+
+### Environment variables (Phase 5D additions)
+
+```
+JWT_SECRET_KEY=<a long random value — required, no default>
+ACCESS_TOKEN_EXPIRE_MINUTES=30   # optional, defaults to 30 if omitted
+```
+
+Generate a real secret with, e.g., `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`.
+
+### Running / testing auth locally
+
+```bash
+alembic upgrade head          # Phase 5C schema (unchanged by Phase 5D)
+uvicorn app.main:app --reload
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"login_id": "some_login_id", "password": "some_password"}'
+curl http://localhost:8000/auth/me -H "Authorization: Bearer <access_token>"
+```
+
+There is no signup endpoint in Phase 5D, so a test account needs its
+`password_hash` set directly (e.g. via a short script calling
+`app.auth.security.hash_password(...)` and inserting/updating the
+`Account` row) — this is intentional per the locked scope: "do not add
+permanent demo/seed accounts."
 
 ### Domain schema (Phase 5C)
 

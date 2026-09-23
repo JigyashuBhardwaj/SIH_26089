@@ -31,6 +31,17 @@ class Settings(BaseSettings):
     # mobile (Expo) and admin (Vite) development clients.
     cors_origins: str = "http://localhost:5173,http://localhost:8081,http://localhost:19006"
 
+    # Phase 5D — JWT authentication configuration.
+    #
+    # Secret used to sign/verify access tokens (HS256). Required — same
+    # "no hardcoded fallback" policy as `database_url` above, since this
+    # is exactly the kind of value that must never live in source code.
+    jwt_secret_key: str
+
+    # How long an issued access token stays valid. Configurable, with a
+    # sensible default (30 minutes) if the environment variable is absent.
+    access_token_expire_minutes: int = 30
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property

@@ -2,14 +2,15 @@
 FastAPI application entry point.
 
 This is the startup/wiring layer only: it creates the app, configures
-CORS for the existing mobile/admin dev clients, and exposes a basic
-health check. No domain routes, authentication, or business logic are
+CORS for the existing mobile/admin dev clients, mounts the Phase 5D auth
+router, and exposes a basic health check. No business/domain routes are
 registered here yet — those arrive in later phases as their own routers.
 """
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.auth import router as auth_router
 from app.config import get_settings
 
 settings = get_settings()
@@ -17,7 +18,10 @@ settings = get_settings()
 app = FastAPI(
     title="Karmanya API",
     version="0.1.0",
-    description="Backend foundation for the Karmanya platform. No domain endpoints yet.",
+    description=(
+        "Karmanya backend. Phase 5D: authentication (/auth/login, /auth/me) "
+        "only — no business/domain endpoints yet."
+    ),
 )
 
 app.add_middleware(
@@ -27,6 +31,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth_router)
 
 
 @app.get("/health")
