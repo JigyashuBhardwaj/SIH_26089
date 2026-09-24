@@ -3,15 +3,18 @@ FastAPI application entry point.
 
 This is the startup/wiring layer only: it creates the app, configures
 CORS for the existing mobile/admin dev clients, mounts the Phase 5D auth
-router and the Phase 5E-B read-only service/user routers, and exposes a
-basic health check. No ServiceRequest/worker/association/federation
-business routes are registered here yet — those arrive in later phases.
+router, the Phase 5E-B read-only service/user routers, and the Phase 5E-C
+USER-owned ServiceRequest routes, and exposes a basic health check. No
+worker/association/federation business routes, request lifecycle,
+matching, or assignment are registered here yet — those arrive in later
+phases.
 """
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.auth import router as auth_router
+from app.api.requests import router as requests_router
 from app.api.services import router as services_router
 from app.api.users import router as users_router
 from app.config import get_settings
@@ -25,8 +28,10 @@ app = FastAPI(
         "Karmanya backend. Phase 5D: authentication (/auth/login, "
         "/auth/me). Phase 5E-B: read-only service catalogue "
         "(/services, /services/{service_id}) and the authenticated "
-        "user's own profile (/users/me). No other business/domain "
-        "endpoints yet."
+        "user's own profile (/users/me). Phase 5E-C: the authenticated "
+        "USER's own ServiceRequests (/requests, /requests/{request_id}) "
+        "— creation only, always starting at PENDING; no matching, "
+        "assignment, or lifecycle transitions yet."
     ),
 )
 
@@ -41,6 +46,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(services_router)
 app.include_router(users_router)
+app.include_router(requests_router)
 
 
 @app.get("/health")
