@@ -1,7 +1,8 @@
 """
 Tests for the Phase 5E-D ASSOCIATION_ADMIN routes:
 `GET /associations/me/workers`, `GET /associations/me/requests`,
-`GET /associations/me/requests/{request_id}`.
+`GET /associations/me/requests/{request_id}`; and the Phase 6B-pre
+public directory route `GET /associations`.
 """
 
 import uuid
@@ -13,6 +14,7 @@ from app.models.service_request import ServiceRequest
 
 WORKERS_URL = "/associations/me/workers"
 REQUESTS_URL = "/associations/me/requests"
+ASSOCIATIONS_URL = "/associations"
 
 
 def _make_association_admin(make_account, *, association_id):
@@ -23,6 +25,161 @@ def _make_federation_and_association(make_federation, make_association):
     federation = make_federation()
     association = make_association(federation_id=federation.id)
     return federation, association
+
+
+# --- GET /associations (Phase 6B-pre public directory) ------------------
+
+
+def test_associations_list_user_can_call(
+    client, make_account, make_user_profile, make_federation, make_association, auth_header
+):
+    federation, association = _make_federation_and_association(make_federation, make_association)
+    user_account = make_account(role=AccountRole.USER)
+    make_user_profile(account_id=user_account.id)
+
+    response = client.get(ASSOCIATIONS_URL, headers=auth_header(user_account))
+
+    assert response.status_code == 200
+    assert str(association.id) in [item["id"] for item in response.json()["items"]]
+
+
+def test_associations_list_worker_can_call(
+    client, make_account, make_worker, make_federation, make_association, auth_header
+):
+    federation, association = _make_federation_and_association(make_federation, make_association)
+    worker_account = make_account(role=AccountRole.WORKER)
+    make_worker(account_id=worker_account.id, association_id=association.id)
+
+    response = client.get(ASSOCIATIONS_URL, headers=auth_header(worker_account))
+
+    assert response.status_code == 200
+
+
+def test_associations_list_association_admin_can_call(
+    client, make_account, make_federation, make_association, auth_header
+):
+    federation, association = _make_federation_and_association(make_federation, make_association)
+    admin = _make_association_admin(make_account, association_id=association.id)
+
+    response = client.get(ASSOCIATIONS_URL, headers=auth_header(admin))
+
+    assert response.status_code == 200
+
+
+def test_associations_list_federation_admin_can_call(
+    client, make_account, make_federation, make_association, auth_header
+):
+    federation, association = _make_federation_and_association(make_federation, make_association)
+    federation_admin = make_account(role=AccountRole.FEDERATION_ADMIN, federation_id=federation.id)
+
+    response = client.get(ASSOCIATIONS_URL, headers=auth_header(federation_admin))
+
+    assert response.status_code == 200
+
+
+def test_associations_list_unauthenticated_returns_401(client):
+    response = client.get(ASSOCIATIONS_URL)
+    assert response.status_code == 401
+
+
+def test_associations_list_returns_all_associations_across_federations(
+    client, make_account, make_user_profile, make_federation, make_association, auth_header
+):
+    """No federation filtering for USER accounts: every Association row is
+    returned regardless of which Federation it belongs to."""
+    federation_a = make_federation()
+    federation_b = make_federation()
+    association_a = make_association(federation_id=federation_a.id)
+    association_b = make_association(federation_id=federation_b.id)
+
+    user_account = make_account(role=AccountRole.USER)
+    make_user_profile(account_id=user_account.id)
+
+    response = client.get(ASSOCIATIONS_URL, headers=auth_header(user_account))
+
+    ids = [item["id"] for item in response.json()["items"]]
+    assert str(association_a.id) in ids
+    assert str(association_b.id) in ids
+
+
+def test_associations_list_pagination(
+    client, make_account, make_user_profile, make_federation, make_association, auth_header
+):
+    federation = make_federation()
+    for i in range(5):
+        make_association(federation_id=federation.id, name=f"Association {i}")
+
+    user_account = make_account(role=AccountRole.USER)
+    make_user_profile(account_id=user_account.id)
+
+    response = client.get(
+        ASSOCIATIONS_URL, params={"page": 2, "page_size": 2}, headers=auth_header(user_account)
+    )
+    body = response.json()
+    assert body["page"] == 2
+    assert body["pageSize"] == 2
+    assert body["total"] >= 5
+    assert len(body["items"]) == 2
+
+
+def test_associations_list_ordering_is_deterministic(
+    client, make_account, make_user_profile, make_federation, make_association, auth_header
+):
+    federation = make_federation()
+    for name in ["Zara Association", "Amit Association", "Mohan Association"]:
+        make_association(federation_id=federation.id, name=name)
+
+    user_account = make_account(role=AccountRole.USER)
+    make_user_profile(account_id=user_account.id)
+
+    response = client.get(ASSOCIATIONS_URL, headers=auth_header(user_account))
+    names = [item["name"] for item in response.json()["items"]]
+    assert names == sorted(names)
+
+
+def test_associations_list_response_shape_matches_association_list_response(
+    client, make_account, make_user_profile, make_federation, make_association, auth_header
+):
+    federation, association = _make_federation_and_association(make_federation, make_association)
+    user_account = make_account(role=AccountRole.USER)
+    make_user_profile(account_id=user_account.id)
+
+    response = client.get(ASSOCIATIONS_URL, headers=auth_header(user_account))
+    body = response.json()
+
+    assert set(body.keys()) == {"items", "page", "pageSize", "total"}
+    assert body["page"] == 1
+    assert body["pageSize"] == 20
+    item = body["items"][0]
+    assert set(item.keys()) == {"id", "federationId", "name", "createdAt", "updatedAt"}
+
+
+def test_associations_list_does_not_expose_worker_or_request_data(
+    client,
+    make_account,
+    make_user_profile,
+    make_federation,
+    make_association,
+    make_worker,
+    auth_header,
+):
+    """The directory listing must never leak association-private data
+    (worker rows, request rows) — only id/federationId/name/timestamps."""
+    federation, association = _make_federation_and_association(make_federation, make_association)
+    worker_account = make_account(role=AccountRole.WORKER)
+    make_worker(account_id=worker_account.id, association_id=association.id, full_name="Amit Kumar")
+
+    user_account = make_account(role=AccountRole.USER)
+    make_user_profile(account_id=user_account.id)
+
+    response = client.get(ASSOCIATIONS_URL, headers=auth_header(user_account))
+    body_text = response.text
+
+    assert "Amit Kumar" not in body_text
+    assert "workerCode" not in body_text
+    assert "fullName" not in body_text
+    for item in response.json()["items"]:
+        assert set(item.keys()) == {"id", "federationId", "name", "createdAt", "updatedAt"}
 
 
 # --- GET /associations/me/workers ---------------------------------------

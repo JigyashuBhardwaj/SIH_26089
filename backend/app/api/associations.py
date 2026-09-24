@@ -25,8 +25,21 @@ Phase 5E-H adds one more READ-ONLY operation:
     endpoint never creates, modifies, or selects an Assignment, and never
     mutates the ServiceRequest — it only reads and ranks.
 
-Scope is always derived from the authenticated Account's own
-`association_id` column — never from a client-supplied id.
+Scope for all `/associations/me/*` routes above is always derived from the
+authenticated Account's own `association_id` column — never from a
+client-supplied id.
+
+Phase 6B-pre adds one more, unrelated, top-level route:
+
+`GET /associations` — a plain, public-style directory listing of every
+    Association row (id, federationId, name only — no worker/request data),
+    open to ANY authenticated role. This exists so a USER-role client (the
+    mobile booking flow) can resolve real backend Association UUIDs instead
+    of relying on a hardcoded/local id list, mirroring the existing
+    `GET /services` catalogue route's posture exactly. It is intentionally
+    separate from the `/me/*` sub-resource above: it grants no access to any
+    association's private operational data, and does not touch any existing
+    route, scope helper, or role guard.
 """
 
 from uuid import UUID
@@ -36,21 +49,62 @@ from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.api.errors import conflict, not_found
-from app.auth.dependencies import require_role
+from app.auth.dependencies import get_current_account, require_role
 from app.database import get_db
 from app.models.account import Account
 from app.models.assignment import Assignment
+from app.models.association import Association
 from app.models.enums import AccountRole, AssignmentStatus, ServiceRequestStatus, WorkerStatus
 from app.models.service_request import ServiceRequest
 from app.models.worker import Worker
 from app.models.worker_skill import WorkerSkill
 from app.schemas.assignment import AssignmentCreate, AssignmentPublic
+from app.schemas.association import AssociationListResponse, AssociationPublic
 from app.schemas.candidate import CandidateListResponse, CandidatePublic
 from app.schemas.pagination import PaginationParams
 from app.schemas.request import ServiceRequestListResponse, ServiceRequestPublic
 from app.schemas.worker import WorkerListResponse, WorkerPublic
 
 router = APIRouter(prefix="/associations", tags=["associations"])
+
+
+@router.get("", response_model=AssociationListResponse)
+def list_associations(
+    pagination: PaginationParams = Depends(),
+    db: Session = Depends(get_db),
+    _account: Account = Depends(get_current_account),
+) -> AssociationListResponse:
+    """
+    Return every Association row, paginated, ordered by `name ASC` with
+    `id ASC` as a stable tiebreaker. Any authenticated role may call this —
+    it is a public directory listing (id/federationId/name only), not a
+    view into any association's private workers or requests, so it does
+    not need `require_role`/association-scope enforcement the way
+    `/associations/me/*` does.
+    """
+    base_query = select(Association)
+
+    total = db.execute(
+        select(func.count()).select_from(base_query.subquery())
+    ).scalar_one()
+
+    associations = (
+        db.execute(
+            base_query.order_by(Association.name.asc(), Association.id.asc())
+            .offset(pagination.offset)
+            .limit(pagination.page_size)
+        )
+        .scalars()
+        .all()
+    )
+
+    return AssociationListResponse(
+        items=[AssociationPublic.model_validate(association) for association in associations],
+        page=pagination.page,
+        page_size=pagination.page_size,
+        total=total,
+    )
+
 
 # Assignment statuses that count as "currently active" for a ServiceRequest
 # — i.e. still awaiting a worker's response or already accepted and being
