@@ -1,16 +1,16 @@
 """
-Typed response models for the Phase 5E-D worker-related read routes:
+Typed response models for the worker-related read routes:
 `GET /associations/me/workers`, `GET /workers/me`, `GET /federation/me/workers`.
 
-Exposes ONLY fields that exist on the current, locked Phase 5C `Worker`
-model. Per the Phase 5E-D reconciliation: `Worker.address`, `.pincode`,
-`.rating`, and `.total_jobs_completed` do NOT exist in the current
-database schema and are deliberately NOT included here — adding them
-(worker location/statistics data for future matching) is explicitly out
-of scope for this phase.
+Phase 5E-G adds the four worker profile/matching-data fields
+(`address`, `pincode`, `rating`, `totalJobsCompleted`) established on the
+`Worker` model in this same phase -- see `app/models/worker.py` for their
+exact constraints. No matching/ranking logic reads them yet; this is a
+read-only exposure of already-authoritative backend data.
 """
 
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -30,6 +30,10 @@ class WorkerPublic(BaseModel):
     full_name: str = Field(alias="fullName")
     phone: str | None = Field(alias="phoneNumber")
     status: WorkerStatus
+    address: str
+    pincode: str
+    rating: Decimal
+    total_jobs_completed: int = Field(alias="totalJobsCompleted")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
 

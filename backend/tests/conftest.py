@@ -225,14 +225,31 @@ def make_worker(db_session):
         association_id,
         worker_code: str | None = None,
         full_name: str = "Test Worker",
+        status: WorkerStatus = WorkerStatus.ACTIVE,
+        address: str | None = None,
+        pincode: str | None = None,
+        rating=None,
+        total_jobs_completed: int | None = None,
     ) -> Worker:
         worker = Worker(
             account_id=account_id,
             association_id=association_id,
             worker_code=worker_code or f"TW-{uuid.uuid4().hex[:8]}",
             full_name=full_name,
-            status=WorkerStatus.ACTIVE,
+            status=status,
         )
+        # Only set these when explicitly overridden -- otherwise leave
+        # them unset so the model's own Phase 5E-G defaults (Not
+        # Provided/000000/0.00/0) apply, exactly as they did for every
+        # `make_worker` call written before this phase.
+        if address is not None:
+            worker.address = address
+        if pincode is not None:
+            worker.pincode = pincode
+        if rating is not None:
+            worker.rating = rating
+        if total_jobs_completed is not None:
+            worker.total_jobs_completed = total_jobs_completed
         db_session.add(worker)
         db_session.flush()
         db_session.refresh(worker)

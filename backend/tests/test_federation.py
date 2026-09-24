@@ -137,6 +137,10 @@ def test_federation_admin_can_list_workers_under_federation(
         "fullName",
         "phoneNumber",
         "status",
+        "address",
+        "pincode",
+        "rating",
+        "totalJobsCompleted",
         "createdAt",
         "updatedAt",
     }

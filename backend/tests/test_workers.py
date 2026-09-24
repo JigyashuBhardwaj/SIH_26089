@@ -46,6 +46,10 @@ def test_worker_can_get_own_profile(
         "fullName",
         "phoneNumber",
         "status",
+        "address",
+        "pincode",
+        "rating",
+        "totalJobsCompleted",
         "createdAt",
         "updatedAt",
     }

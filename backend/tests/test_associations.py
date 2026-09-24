@@ -56,6 +56,10 @@ def test_admin_can_list_own_association_workers(
         "fullName",
         "phoneNumber",
         "status",
+        "address",
+        "pincode",
+        "rating",
+        "totalJobsCompleted",
         "createdAt",
         "updatedAt",
     }
