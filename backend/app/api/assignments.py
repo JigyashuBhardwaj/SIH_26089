@@ -6,20 +6,29 @@ offers.
 `POST /assignments/{assignment_id}/decline`  — PENDING_RESPONSE -> DECLINED
 `POST /assignments/{assignment_id}/cancel`   — ACCEPTED -> CANCELLED_BY_WORKER
 
+Phase 5E-I adds the one remaining Assignment-side lifecycle mutation:
+
+`POST /assignments/{assignment_id}/complete` — ACCEPTED -> COMPLETED
+
 This router never creates an Assignment itself -- that remains the
 Phase 5E-E Association Admin endpoint's job
 (`POST /associations/me/requests/{request_id}/assignments`). It only
 transitions an Assignment that already exists to a resolved state, always
 together with the matching ServiceRequest transition:
 
-    Accept:  Assignment PENDING_RESPONSE -> ACCEPTED,          ServiceRequest ASSIGNED -> ACCEPTED
-    Decline: Assignment PENDING_RESPONSE -> DECLINED,          ServiceRequest ASSIGNED -> MATCHING
-    Cancel:  Assignment ACCEPTED         -> CANCELLED_BY_WORKER, ServiceRequest ACCEPTED -> MATCHING
+    Accept:   Assignment PENDING_RESPONSE -> ACCEPTED,           ServiceRequest ASSIGNED -> ACCEPTED
+    Decline:  Assignment PENDING_RESPONSE -> DECLINED,           ServiceRequest ASSIGNED -> MATCHING
+    Cancel:   Assignment ACCEPTED         -> CANCELLED_BY_WORKER, ServiceRequest ACCEPTED -> MATCHING
+    Complete: Assignment ACCEPTED         -> COMPLETED,           ServiceRequest ACCEPTED -> WORKER_COMPLETED
 
-Assignment rows are never deleted or overwritten -- a decline/cancel
-leaves the acted-upon row as a permanent historical record, and a new
-Assignment (via the Phase 5E-E endpoint) is the only way a request gets
-re-offered to another worker.
+Assignment rows are never deleted or overwritten -- a decline/cancel/
+complete leaves the acted-upon row as a permanent historical record, and
+a new Assignment (via the Phase 5E-E endpoint) is the only way a request
+gets re-offered to another worker. COMPLETED is terminal for an
+Assignment: once reached, no further worker action here targets that row
+again. What happens to the ServiceRequest after WORKER_COMPLETED (user
+confirmation, demo payment) is handled entirely by
+`app/api/requests.py`, which never touches the Assignment table.
 """
 
 from datetime import datetime, timezone
@@ -183,6 +192,49 @@ def cancel_assignment(
 
     assignment.status = AssignmentStatus.CANCELLED_BY_WORKER
     service_request.status = ServiceRequestStatus.MATCHING
+
+    db.flush()
+    db.refresh(assignment)
+
+    return AssignmentPublic.model_validate(assignment)
+
+
+@router.post("/{assignment_id}/complete", response_model=AssignmentPublic)
+def complete_assignment(
+    assignment_id: UUID,
+    db: Session = Depends(get_db),
+    account: Account = Depends(require_role(AccountRole.WORKER)),
+) -> AssignmentPublic:
+    """
+    The authenticated worker marks their own ACCEPTED Assignment as the
+    completed job (Phase 5E-I). Requires the linked ServiceRequest to
+    still be ACCEPTED. Transitions both atomically: Assignment ->
+    COMPLETED, ServiceRequest -> WORKER_COMPLETED. No new Assignment is
+    created, and this row's history (including its original
+    `responded_at` from `accept_assignment`) is left untouched --
+    `updated_at` still advances automatically via the model's own
+    `onupdate=func.now()`. COMPLETED is terminal for this Assignment: a
+    second call against the same row is rejected with 409, exactly like
+    every other lifecycle mutation on this router. What happens next to
+    the ServiceRequest (user confirmation, demo payment) is entirely
+    `app/api/requests.py`'s responsibility -- this endpoint never reads
+    or writes past WORKER_COMPLETED.
+    """
+    worker = _get_own_worker(db, account)
+    assignment, service_request = _lock_assignment_and_request(db, assignment_id)
+
+    # An Assignment that exists but belongs to another worker is
+    # indistinguishable from a nonexistent one.
+    if assignment.worker_id != worker.id:
+        raise not_found("Assignment not found")
+
+    if assignment.status != AssignmentStatus.ACCEPTED:
+        raise conflict("Assignment is not currently accepted")
+    if service_request.status != ServiceRequestStatus.ACCEPTED:
+        raise conflict("Service request is not in a state that can be completed")
+
+    assignment.status = AssignmentStatus.COMPLETED
+    service_request.status = ServiceRequestStatus.WORKER_COMPLETED
 
     db.flush()
     db.refresh(assignment)
