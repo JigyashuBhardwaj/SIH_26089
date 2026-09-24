@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { BottomNavBar } from '../../components/BottomNavBar';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { ScreenHeader } from '../../components/ScreenHeader';
@@ -10,16 +10,31 @@ import { useRequests, type LocalServiceRequest } from '../../features/requests';
 import { colors, radius, spacing, typography } from '../../constants/theme';
 
 /**
- * Reachable from User Home. Lists every locally-created request (Phase
- * 3D) — both active ones ("Finding a Worker") and cancelled ones, kept
+ * Request statuses the backend still allows the user to cancel from
+ * (`_USER_CANCELLABLE_STATUSES` in `backend/app/api/requests.py`). Used
+ * here only to decide whether the Cancel button/"active" styling shows —
+ * actually calling backend cancellation is Phase 6B-6's scope, not this
+ * one's.
+ */
+const CANCELLABLE_STATUSES: LocalServiceRequest['status'][] = ['PENDING', 'MATCHING', 'ASSIGNED', 'ACCEPTED'];
+
+/**
+ * Reachable from User Home. Lists the authenticated user's real requests
+ * from the backend (Phase 6B-5: `GET /requests`, via
+ * `RequestsContext.loadRequests()` — this screen never fetches directly)
+ * — both active ones ("Finding a Worker") and cancelled ones, kept
  * visible with a clear cancelled state rather than silently removed, so
  * the person still has a record of what they cancelled.
  */
 export default function OngoingRequestsScreen() {
   const router = useRouter();
   const { session, logout } = useAuth();
-  const { requests, cancelRequest } = useRequests();
+  const { requests, loadState, loadError, loadRequests, cancelRequest } = useRequests();
   const [cancelTargetId, setCancelTargetId] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadRequests();
+  }, [loadRequests]);
 
   const handleLogout = () => {
     logout();
@@ -31,6 +46,12 @@ export default function OngoingRequestsScreen() {
     setCancelTargetId(null);
   };
 
+  // A pull-to-refresh reload keeps the existing list visible while it
+  // runs; only the very first load (nothing to show yet) uses the
+  // full-screen loading state below.
+  const isRefreshing = loadState === 'loading' && requests.length > 0;
+  const isInitialLoading = loadState === 'loading' && requests.length === 0;
+
   return (
     <View style={styles.screen}>
       <View style={styles.headerWrap}>
@@ -41,11 +62,28 @@ export default function OngoingRequestsScreen() {
         />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={loadRequests} />}
+      >
         <Text style={styles.title}>Ongoing Requests</Text>
         <Text style={styles.subtitle}>Track and manage your service requests.</Text>
 
-        {requests.length === 0 ? (
+        {isInitialLoading ? (
+          <View style={styles.centerState}>
+            <ActivityIndicator color={colors.blue} />
+            <Text style={styles.centerStateText}>Loading requests…</Text>
+          </View>
+        ) : loadState === 'error' ? (
+          <View style={styles.centerState}>
+            <Ionicons name="cloud-offline-outline" size={28} color={colors.textMuted} />
+            <Text style={styles.emptyTitle}>Couldn&apos;t load requests</Text>
+            <Text style={styles.emptyBody}>{loadError}</Text>
+            <Pressable style={styles.retryButton} onPress={loadRequests}>
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </Pressable>
+          </View>
+        ) : requests.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="time-outline" size={32} color={colors.textMuted} />
             <Text style={styles.emptyTitle}>No requests yet</Text>
@@ -92,7 +130,7 @@ interface RequestCardProps {
 
 function RequestCard({ request, onCancel }: RequestCardProps) {
   const isCancelled = request.status === 'CANCELLED_BY_USER';
-  const isActive = request.status === 'MATCHING';
+  const isActive = CANCELLABLE_STATUSES.includes(request.status);
 
   return (
     <View style={[styles.card, isCancelled && styles.cardCancelled]}>
@@ -175,6 +213,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   emptyActionText: {
+    color: colors.blue,
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  centerState: {
+    alignItems: 'center',
+    paddingVertical: spacing.xl,
+    gap: spacing.sm,
+  },
+  centerStateText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderColor: colors.blue,
+    borderRadius: radius.pill,
+    paddingVertical: 10,
+    paddingHorizontal: spacing.lg,
+  },
+  retryButtonText: {
     color: colors.blue,
     fontWeight: '700',
     fontSize: 13,
