@@ -1,21 +1,30 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { BottomNavBar } from '../../components/BottomNavBar';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { useAuth } from '../../features/auth';
 import { colors, radius, spacing, typography } from '../../constants/theme';
-import { PREDEFINED_SERVICES } from '../../services/serviceCatalog';
-import { ASSOCIATIONS, getEligibleAssociations, type Association } from '../../services/associationCatalog';
+import { describeAssociationCatalogError, fetchAssociationCatalog } from '../../services/associationCatalog';
+import type { Association } from '@shared/types';
+
+type CatalogLoadState = 'loading' | 'error' | 'ready';
 
 /**
- * Phase 3C — the user picks the labour ASSOCIATION that will fulfil the
- * request (not an individual worker; that's federation-controlled
- * allocation, out of scope here). Service and date/time come from Phase
- * 3A/3B via route params and are only ever displayed/forwarded, never
- * re-created — the Phase 3A catalogue stays the single source of truth
- * for what the selected service actually is.
+ * The user picks the labour ASSOCIATION that will fulfil the request
+ * (not an individual worker; that's federation-controlled allocation,
+ * out of scope here). Service and date/time come from the previous two
+ * screens via route params and are only ever displayed/forwarded, never
+ * re-created or re-resolved against any local catalogue — `serviceId`
+ * arrives already carrying the real backend UUID `GET /services`
+ * returned (Phase 6B-1), so this screen never fetches services itself.
+ *
+ * Phase 6B-2: the association list now comes from the real backend
+ * (`GET /associations`, Phase 6B-pre) instead of a hardcoded local
+ * catalogue. The backend has no association-service eligibility concept
+ * at all, so every returned association is selectable here — no
+ * category-based filtering is applied or reconstructed.
  */
 export default function SelectAssociationScreen() {
   const router = useRouter();
@@ -27,20 +36,40 @@ export default function SelectAssociationScreen() {
   }>();
 
   const [selectedAssociationId, setSelectedAssociationId] = useState<string | null>(null);
+  const [associations, setAssociations] = useState<Association[]>([]);
+  const [loadState, setLoadState] = useState<CatalogLoadState>('loading');
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const selectedService = useMemo(
-    () => PREDEFINED_SERVICES.find((service) => service.id === serviceId) ?? null,
-    [serviceId]
+  const hasRequiredParams = Boolean(serviceId && serviceName && dateTimeLabel);
+
+  const loadAssociations = useCallback(() => {
+    let cancelled = false;
+    setLoadState('loading');
+    setLoadError(null);
+
+    fetchAssociationCatalog()
+      .then((items) => {
+        if (cancelled) return;
+        setAssociations(items);
+        setLoadState('ready');
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setLoadError(describeAssociationCatalogError(err));
+        setLoadState('error');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => loadAssociations(), [loadAssociations]);
+
+  const associationsById = useMemo(
+    () => new Map(associations.map((association) => [association.id, association])),
+    [associations]
   );
-
-  const hasRequiredParams = Boolean(selectedService && serviceName && dateTimeLabel);
-
-  const eligibleAssociations = useMemo(
-    () => (selectedService ? getEligibleAssociations(selectedService) : []),
-    [selectedService]
-  );
-
-  const associationsById = useMemo(() => new Map(ASSOCIATIONS.map((association) => [association.id, association])), []);
 
   const handleLogout = () => {
     logout();
@@ -99,8 +128,28 @@ export default function SelectAssociationScreen() {
           <>
             <Text style={styles.sectionHeading}>Available Associations</Text>
 
-            {eligibleAssociations.length > 0 ? (
-              eligibleAssociations.map((association) => (
+            {loadState === 'loading' ? (
+              <View style={styles.centerState}>
+                <ActivityIndicator color={colors.blue} />
+                <Text style={styles.centerStateText}>Loading associations…</Text>
+              </View>
+            ) : loadState === 'error' ? (
+              <View style={styles.centerState}>
+                <Ionicons name="cloud-offline-outline" size={28} color={colors.textMuted} />
+                <Text style={styles.emptyTitle}>Couldn&apos;t load associations</Text>
+                <Text style={styles.emptyBody}>{loadError}</Text>
+                <Pressable style={styles.retryButton} onPress={loadAssociations}>
+                  <Text style={styles.retryButtonText}>Retry</Text>
+                </Pressable>
+              </View>
+            ) : associations.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="business-outline" size={28} color={colors.textMuted} />
+                <Text style={styles.emptyTitle}>No associations available</Text>
+                <Text style={styles.emptyBody}>There are no labour associations available right now. Please check back later.</Text>
+              </View>
+            ) : (
+              associations.map((association) => (
                 <AssociationCard
                   key={association.id}
                   association={association}
@@ -108,15 +157,6 @@ export default function SelectAssociationScreen() {
                   onPress={() => setSelectedAssociationId(association.id)}
                 />
               ))
-            ) : (
-              <View style={styles.emptyState}>
-                <Ionicons name="business-outline" size={28} color={colors.textMuted} />
-                <Text style={styles.emptyTitle}>No associations available</Text>
-                <Text style={styles.emptyBody}>
-                  No labour association currently supports this service. Please go back and choose a different
-                  service.
-                </Text>
-              </View>
             )}
           </>
         ) : null}
@@ -145,6 +185,14 @@ interface AssociationCardProps {
   onPress: () => void;
 }
 
+/**
+ * `Association` (from `@shared/types`, matching the real backend
+ * `AssociationPublic`) carries only `id`/`federationId`/`name`/
+ * timestamps — no rating, worker count, or service list, unlike the old
+ * local mock catalogue. Rather than inventing display data the backend
+ * doesn't provide, the card shows only what's real: the association's
+ * name and its selection state.
+ */
 function AssociationCard({ association, isSelected, onPress }: AssociationCardProps) {
   return (
     <Pressable
@@ -154,20 +202,12 @@ function AssociationCard({ association, isSelected, onPress }: AssociationCardPr
       accessibilityState={{ selected: isSelected }}
     >
       <View style={styles.associationHeaderRow}>
-        <Text style={styles.associationName}>{association.name}</Text>
+        <View style={styles.associationNameRow}>
+          <Ionicons name="business-outline" size={18} color={colors.blue} />
+          <Text style={styles.associationName}>{association.name}</Text>
+        </View>
         <View style={[styles.radioOuter, isSelected && styles.radioOuterSelected]}>
           {isSelected ? <View style={styles.radioInner} /> : null}
-        </View>
-      </View>
-      <Text style={styles.associationServices}>{association.displayServices.join(' • ')}</Text>
-      <View style={styles.associationMetaRow}>
-        <View style={styles.associationMetaItem}>
-          <Ionicons name="star" size={14} color={colors.warning} />
-          <Text style={styles.associationMetaText}>{association.rating}</Text>
-        </View>
-        <View style={styles.associationMetaItem}>
-          <Ionicons name="people-outline" size={14} color={colors.textSecondary} />
-          <Text style={styles.associationMetaText}>{association.workerCount} workers</Text>
         </View>
       </View>
     </Pressable>
@@ -258,6 +298,12 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: spacing.sm,
   },
+  associationNameRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
   associationName: {
     flex: 1,
     fontSize: 15,
@@ -282,25 +328,29 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     backgroundColor: colors.blue,
   },
-  associationServices: {
-    fontSize: 12,
+  centerState: {
+    alignItems: 'center',
+    paddingVertical: spacing.xl,
+    gap: spacing.sm,
+  },
+  centerStateText: {
+    fontSize: 13,
     color: colors.textSecondary,
-    marginTop: spacing.xs,
   },
-  associationMetaRow: {
-    flexDirection: 'row',
-    gap: spacing.lg,
-    marginTop: spacing.sm,
-  },
-  associationMetaItem: {
+  retryButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    borderWidth: 1,
+    borderColor: colors.blue,
+    borderRadius: radius.pill,
+    paddingVertical: 10,
+    paddingHorizontal: spacing.lg,
   },
-  associationMetaText: {
-    fontSize: 12,
+  retryButtonText: {
+    color: colors.blue,
     fontWeight: '700',
-    color: colors.navy,
+    fontSize: 13,
   },
   emptyState: {
     alignItems: 'center',

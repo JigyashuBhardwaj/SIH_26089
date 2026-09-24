@@ -1,30 +1,65 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { BottomNavBar } from '../../components/BottomNavBar';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { ServiceCard } from '../../components/ServiceCard';
 import { SkylineIllustration } from '../../components/illustrations/SkylineIllustration';
 import { useAuth } from '../../features/auth';
-import { getPopularServices, searchServices, type CatalogService } from '../../services/serviceCatalog';
+import {
+  describeServiceCatalogError,
+  fetchServiceCatalog,
+  getPopularServices,
+  searchServices,
+  type CatalogService,
+} from '../../services/serviceCatalog';
 import { colors, radius, spacing, typography } from '../../constants/theme';
 
+type CatalogLoadState = 'loading' | 'error' | 'ready';
+
 /**
- * First screen of the User booking workflow (Phase 3A). Lets the person
- * pick a predefined service — nothing beyond that. Selecting a service
- * navigates to the Schedule Date & Time placeholder; the actual booking
- * workflow (date/time, address, association, confirmation) is built in
- * later Phase 3 steps.
+ * First screen of the User booking workflow. Lets the person pick a
+ * service from the real backend catalogue (`GET /services`, Phase 6B-1)
+ * — nothing beyond that. Selecting a service navigates to Schedule Date
+ * & Time with the service's real backend id/name; the rest of the
+ * booking workflow is built in later Phase 6B steps.
  */
 export default function BookServiceScreen() {
   const router = useRouter();
   const { session, logout } = useAuth();
   const [query, setQuery] = useState('');
+  const [catalog, setCatalog] = useState<CatalogService[]>([]);
+  const [loadState, setLoadState] = useState<CatalogLoadState>('loading');
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadCatalog = useCallback(() => {
+    let cancelled = false;
+    setLoadState('loading');
+    setLoadError(null);
+
+    fetchServiceCatalog()
+      .then((services) => {
+        if (cancelled) return;
+        setCatalog(services);
+        setLoadState('ready');
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setLoadError(describeServiceCatalogError(err));
+        setLoadState('error');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => loadCatalog(), [loadCatalog]);
 
   const isSearching = query.trim().length > 0;
-  const results = useMemo(() => searchServices(query), [query]);
-  const popular = useMemo(() => getPopularServices(), []);
+  const results = useMemo(() => searchServices(catalog, query), [catalog, query]);
+  const popular = useMemo(() => getPopularServices(catalog), [catalog]);
 
   const handleLogout = () => {
     logout();
@@ -77,7 +112,31 @@ export default function BookServiceScreen() {
         </View>
       </View>
 
-      {isSearching ? (
+      {loadState === 'loading' ? (
+        <View style={styles.centerState}>
+          <ActivityIndicator color={colors.blue} />
+          <Text style={styles.centerStateText}>Loading services…</Text>
+        </View>
+      ) : loadState === 'error' ? (
+        <View style={styles.centerState}>
+          <View style={styles.emptyIconWrap}>
+            <Ionicons name="cloud-offline-outline" size={26} color={colors.textMuted} />
+          </View>
+          <Text style={styles.emptyTitle}>Couldn&apos;t load services</Text>
+          <Text style={styles.emptyBody}>{loadError}</Text>
+          <Pressable style={styles.emptyAction} onPress={loadCatalog}>
+            <Text style={styles.emptyActionText}>Retry</Text>
+          </Pressable>
+        </View>
+      ) : catalog.length === 0 ? (
+        <View style={styles.centerState}>
+          <View style={styles.emptyIconWrap}>
+            <Ionicons name="construct-outline" size={26} color={colors.textMuted} />
+          </View>
+          <Text style={styles.emptyTitle}>No services available</Text>
+          <Text style={styles.emptyBody}>There are no services to book right now. Please check back later.</Text>
+        </View>
+      ) : isSearching ? (
         <FlatList
           key="search-results"
           contentContainerStyle={styles.listContent}
@@ -257,6 +316,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.navy,
     lineHeight: 17,
+  },
+  centerState: {
+    alignItems: 'center',
+    paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.lg,
+    gap: spacing.sm,
+  },
+  centerStateText: {
+    fontSize: 13,
+    color: colors.textSecondary,
   },
   emptyState: {
     alignItems: 'center',

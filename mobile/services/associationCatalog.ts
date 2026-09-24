@@ -1,58 +1,78 @@
-import type { CatalogService } from './serviceCatalog';
+import type { Association } from '@shared/types';
+import { getAccessToken } from './authService';
+import { ApiError, NetworkUnavailableError, request } from './apiClient';
 
 /**
- * Demo labour associations for this prototype. Local to the mobile app,
- * same reasoning as `serviceCatalog.ts`: this specific data will be
- * replaced by a real association directory call in a later phase, but
- * the shape stays the same so screens don't need to change.
+ * Phase 6B-2: the association catalogue now comes from the real backend
+ * (`GET /associations`), not a hardcoded local list.
  *
- * These are demo/prototype associations only — no real-world affiliation
- * is implied.
+ * The backend models no association-service eligibility relationship at
+ * all — `Association` has no link to `Service`, and every demo `Service`
+ * currently shares one `category` value, "Home Services" (see
+ * `backend/scripts/seed_demo_data.py`), so matching on category would not
+ * be a real signal even if attempted. Per this phase's locked scope,
+ * every association `GET /associations` returns is therefore treated as
+ * selectable — a deliberate MVP simplification, not an oversight. A
+ * later phase can add real eligibility once the backend models one.
+ *
+ * The wire response (`AssociationPublic`, camelCase-aliased) already
+ * matches `shared/types/association.ts`'s `Association` interface field
+ * for field, so no local type or mapping layer is needed here — unlike
+ * `serviceCatalog.ts`, which layers a client-only `icon` field on top.
  */
-export interface Association {
-  id: string;
-  name: string;
-  /**
-   * Exact category strings from the Phase 3A service catalogue
-   * (`shared`/`CatalogService.category`) that this association supports.
-   * Used for eligibility matching — must line up with
-   * `mobile/services/serviceCatalog.ts` categories.
-   */
-  matchCategories: string[];
-  /** Human-readable service list shown on the card (can read more naturally than matchCategories). */
-  displayServices: string[];
-  rating: number;
-  /** Pre-formatted worker count, e.g. "120+". */
-  workerCount: string;
+
+interface AssociationListResponse {
+  items: Association[];
+  page: number;
+  pageSize: number;
+  total: number;
 }
 
-export const ASSOCIATIONS: Association[] = [
-  {
-    id: 'dhanbad-skilled-workers',
-    name: 'Dhanbad Skilled Workers Association',
-    matchCategories: ['Plumbing', 'Electrical', 'Carpentry', 'Masonry'],
-    displayServices: ['Plumbing', 'Electrical', 'Carpentry', 'Masonry'],
-    rating: 4.7,
-    workerCount: '120+',
-  },
-  {
-    id: 'dhanbad-general-workers',
-    name: 'Dhanbad General Workers Association',
-    // "General" matches the Phase 3A "Helper" service's category; the
-    // card itself displays the friendlier "General Helpers" label below.
-    matchCategories: ['Plumbing', 'Painting', 'Cleaning', 'Gardening', 'General'],
-    displayServices: ['Plumbing', 'Painting', 'Cleaning', 'Gardening', 'General Helpers'],
-    rating: 4.5,
-    workerCount: '95+',
-  },
-];
+/**
+ * The largest page size `GET /associations` accepts (backend-enforced,
+ * same `PaginationParams.page_size <= 100` cap as `GET /services`).
+ */
+const MAX_PAGE_SIZE = 100;
 
 /**
- * Associations eligible for a given Phase 3A service. Matches on the
- * service's `category` (from the authoritative Phase 3A catalogue), not
- * on free text, so eligibility always stays in sync with what services
- * actually exist.
+ * Fetches every Association row from `GET /associations`. Like
+ * `serviceCatalog.ts`'s `fetchServiceCatalog`, this never assumes the
+ * whole list fits on one page: it requests the backend's maximum page
+ * size and keeps paging — driven by the server-reported `total`, never a
+ * hardcoded assumption — until every item has been collected.
  */
-export function getEligibleAssociations(service: Pick<CatalogService, 'category'>): Association[] {
-  return ASSOCIATIONS.filter((association) => association.matchCategories.includes(service.category));
+export async function fetchAssociationCatalog(): Promise<Association[]> {
+  const token = await getAccessToken();
+  const collected: Association[] = [];
+  let page = 1;
+
+  for (;;) {
+    const response = await request<AssociationListResponse>(
+      `/associations?page=${page}&page_size=${MAX_PAGE_SIZE}`,
+      { token }
+    );
+    collected.push(...response.items);
+
+    if (response.items.length === 0 || collected.length >= response.total) {
+      break;
+    }
+    page += 1;
+  }
+
+  return collected;
+}
+
+/**
+ * Maps a `fetchAssociationCatalog` failure to a safe, user-facing
+ * message — same pattern as `serviceCatalog.ts`'s
+ * `describeServiceCatalogError`.
+ */
+export function describeAssociationCatalogError(err: unknown): string {
+  if (err instanceof NetworkUnavailableError) {
+    return err.message;
+  }
+  if (err instanceof ApiError) {
+    return err.message;
+  }
+  return 'Something went wrong while loading associations. Please try again.';
 }
