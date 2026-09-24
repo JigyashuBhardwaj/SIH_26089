@@ -1,52 +1,78 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
-import type { ServiceRequestStatus } from '@shared/types';
+import type { ServiceRequest, ServiceRequestStatus } from '@shared/types';
+import { request as apiRequest } from '../../services/apiClient';
+import { getAccessToken } from '../../services/authService';
 
 /**
- * The exact dummy address used for every request in this prototype —
- * there is no real user profile/address system yet (see Phase 3D scope).
+ * The exact dummy address/pincode used for every request in this demo
+ * integration — there is no real user profile/address system yet (Phase
+ * 6B-4 scope explicitly keeps it this way rather than adding one). These
+ * are the two separate fields the backend's `POST /requests` contract
+ * requires (`address`, `pincode`) — never the old combined
+ * "<address> — <pincode>" display string, which the backend never saw.
  */
-export const DEMO_ADDRESS = 'House no. 108, Sector 4, Dhanbad, Jharkhand — 826004';
+const DEMO_REQUEST_ADDRESS = 'House no. 108, Sector 4, Dhanbad, Jharkhand';
+const DEMO_REQUEST_PINCODE = '826004';
 
 /**
- * A locally-created service request. The field set mirrors the shared
- * `Booking` concept (serviceId, associationId, status, address,
- * createdAt) plus a few display-only convenience fields (serviceName,
- * dateTimeLabel, associationName) that a real backend response would
- * normally resolve via a join — since there's no backend here, this
- * prototype just carries them directly. `status` reuses the canonical
- * `BookingStatus` from `shared/types` rather than inventing a new enum.
+ * Retained for screens that still display the old combined string
+ * (`confirm-request.tsx`'s "Service Location" summary row). Display-only
+ * — never sent to the backend as-is; `submitRequest` below sends
+ * `DEMO_REQUEST_ADDRESS`/`DEMO_REQUEST_PINCODE` as separate fields.
+ */
+export const DEMO_ADDRESS = `${DEMO_REQUEST_ADDRESS} — ${DEMO_REQUEST_PINCODE}`;
+
+/**
+ * A submitted service request, as tracked on the USER mobile app.
+ *
+ * Phase 6B-4: `submitRequest` now calls the real `POST /requests` and
+ * this shape carries the authoritative, server-owned fields from that
+ * response (`requestId` <- `ServiceRequestPublic.id`, `requestCode`,
+ * `status`, `requestedDateTime`, `address`, `pincode`, `createdAt`,
+ * `updatedAt`) verbatim — none of them are ever fabricated client-side
+ * anymore. `serviceName`/`associationName`/`dateTimeLabel` remain
+ * UI-only convenience fields the backend does not return (a real join
+ * the backend doesn't perform for this response); they're carried
+ * through from what was already known at submit time, purely for
+ * display, and never override or substitute for a backend-owned field.
  */
 export interface LocalServiceRequest {
+  // Backend-authoritative fields (from ServiceRequestPublic) — always
+  // taken from the POST /requests response, never fabricated.
   requestId: string;
+  requestCode: string;
   serviceId: string;
-  serviceName: string;
-  dateTimeLabel: string;
   associationId: string;
-  associationName: string;
+  requestedDateTime: string;
   address: string;
+  pincode: string;
   status: ServiceRequestStatus;
   createdAt: string;
+  updatedAt: string;
+  // UI-only convenience fields — not part of the backend response.
+  serviceName: string;
+  associationName: string;
+  dateTimeLabel: string;
 }
 
+/**
+ * What `submitRequest` needs. `serviceId`/`associationId`/
+ * `requestedDateTime` are the real backend fields sent to `POST
+ * /requests`; `serviceName`/`associationName`/`dateTimeLabel` are
+ * UI-only and never sent to the backend.
+ */
 export interface SubmitRequestInput {
   serviceId: string;
   serviceName: string;
+  requestedDateTime: string;
   dateTimeLabel: string;
   associationId: string;
   associationName: string;
-}
-
-function generateRequestId(): string {
-  const stamp = Date.now().toString(36).toUpperCase();
-  const random = Math.floor(Math.random() * 1000)
-    .toString()
-    .padStart(3, '0');
-  return `REQ-${stamp}-${random}`;
 }
 
 interface RequestsContextValue {
   requests: LocalServiceRequest[];
-  submitRequest: (input: SubmitRequestInput) => LocalServiceRequest;
+  submitRequest: (input: SubmitRequestInput) => Promise<LocalServiceRequest>;
   cancelRequest: (requestId: string) => void;
   getRequest: (requestId: string) => LocalServiceRequest | undefined;
 }
@@ -54,29 +80,48 @@ interface RequestsContextValue {
 const RequestsContext = createContext<RequestsContextValue | undefined>(undefined);
 
 /**
- * Local/demo request store. No backend exists yet, so submitted requests
- * live only in memory for the current app session — same "mock now, real
- * later" reasoning as `authService.ts` and `serviceCatalog.ts`. When a
- * real backend arrives, only this file's internals need to change
- * (fetches instead of local state); the screens that call `useRequests()`
- * shouldn't need to.
+ * Request store for the USER app.
+ *
+ * Phase 6B-4: `submitRequest` calls the real, authenticated
+ * `POST /requests` (via the existing `apiClient.request<T>()` +
+ * `authService.getAccessToken()` — no second HTTP/error abstraction).
+ * The returned `ServiceRequestPublic` is authoritative for every
+ * server-owned field; this store only adds the UI-only display fields
+ * the backend doesn't return. Submitted requests still live only in
+ * this session's memory (no `GET /requests` yet, per locked scope) —
+ * `cancelRequest` also remains local-only for the same reason.
  */
 export function RequestsProvider({ children }: { children: React.ReactNode }) {
   const [requests, setRequests] = useState<LocalServiceRequest[]>([]);
 
-  const submitRequest = useCallback((input: SubmitRequestInput): LocalServiceRequest => {
+  const submitRequest = useCallback(async (input: SubmitRequestInput): Promise<LocalServiceRequest> => {
+    const token = await getAccessToken();
+    const response = await apiRequest<ServiceRequest>('/requests', {
+      method: 'POST',
+      token,
+      body: {
+        serviceId: input.serviceId,
+        associationId: input.associationId,
+        requestedDateTime: input.requestedDateTime,
+        address: DEMO_REQUEST_ADDRESS,
+        pincode: DEMO_REQUEST_PINCODE,
+      },
+    });
+
     const newRequest: LocalServiceRequest = {
-      ...input,
-      requestId: generateRequestId(),
-      address: DEMO_ADDRESS,
-      // This prototype skips the transient PENDING flash-state a real
-      // backend might briefly occupy — the request is considered
-      // "Finding a Worker" (MATCHING) the moment it's sent. See
-      // shared/booking/bookingStateMachine.ts for the full transition
-      // table; the actual PENDING->MATCHING transition isn't implemented
-      // here, per Phase 3D scope.
-      status: 'MATCHING',
-      createdAt: new Date().toISOString(),
+      requestId: response.id,
+      requestCode: response.requestCode,
+      serviceId: response.serviceId,
+      associationId: response.associationId,
+      requestedDateTime: response.requestedDateTime,
+      address: response.address,
+      pincode: response.pincode,
+      status: response.status,
+      createdAt: response.createdAt,
+      updatedAt: response.updatedAt,
+      serviceName: input.serviceName,
+      associationName: input.associationName,
+      dateTimeLabel: input.dateTimeLabel,
     };
     setRequests((previous) => [newRequest, ...previous]);
     return newRequest;
