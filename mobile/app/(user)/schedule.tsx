@@ -93,6 +93,7 @@ export default function ScheduleScreen() {
         serviceId: serviceId as string,
         serviceName: serviceName as string,
         dateTimeLabel: `${formatDateLabel(combinedDateTime)}, ${formatTimeLabel(combinedDateTime)}`,
+        requestedDateTime: combinedDateTime.toISOString(),
       },
     });
   };

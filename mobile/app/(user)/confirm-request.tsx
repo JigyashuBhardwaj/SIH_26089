@@ -15,15 +15,18 @@ export default function ConfirmRequestScreen() {
   const router = useRouter();
   const { session, logout } = useAuth();
   const { submitRequest } = useRequests();
-  const { serviceId, serviceName, dateTimeLabel, associationId, associationName } = useLocalSearchParams<{
+  const { serviceId, serviceName, dateTimeLabel, requestedDateTime, associationId, associationName } = useLocalSearchParams<{
     serviceId?: string;
     serviceName?: string;
     dateTimeLabel?: string;
+    requestedDateTime?: string;
     associationId?: string;
     associationName?: string;
   }>();
 
-  const hasRequiredParams = Boolean(serviceId && serviceName && dateTimeLabel && associationId && associationName);
+  const hasRequiredParams = Boolean(
+    serviceId && serviceName && dateTimeLabel && requestedDateTime && associationId && associationName
+  );
 
   const handleLogout = () => {
     logout();

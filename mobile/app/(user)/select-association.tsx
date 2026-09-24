@@ -29,10 +29,11 @@ type CatalogLoadState = 'loading' | 'error' | 'ready';
 export default function SelectAssociationScreen() {
   const router = useRouter();
   const { session, logout } = useAuth();
-  const { serviceId, serviceName, dateTimeLabel } = useLocalSearchParams<{
+  const { serviceId, serviceName, dateTimeLabel, requestedDateTime } = useLocalSearchParams<{
     serviceId?: string;
     serviceName?: string;
     dateTimeLabel?: string;
+    requestedDateTime?: string;
   }>();
 
   const [selectedAssociationId, setSelectedAssociationId] = useState<string | null>(null);
@@ -40,7 +41,7 @@ export default function SelectAssociationScreen() {
   const [loadState, setLoadState] = useState<CatalogLoadState>('loading');
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const hasRequiredParams = Boolean(serviceId && serviceName && dateTimeLabel);
+  const hasRequiredParams = Boolean(serviceId && serviceName && dateTimeLabel && requestedDateTime);
 
   const loadAssociations = useCallback(() => {
     let cancelled = false;
@@ -85,6 +86,7 @@ export default function SelectAssociationScreen() {
         serviceId: serviceId as string,
         serviceName: serviceName as string,
         dateTimeLabel: dateTimeLabel as string,
+        requestedDateTime: requestedDateTime as string,
         associationId: association.id,
         associationName: association.name,
       },
