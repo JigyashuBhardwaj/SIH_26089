@@ -7,16 +7,31 @@ import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { useAuth } from '../../features/auth';
 import { useRequests, type LocalServiceRequest } from '../../features/requests';
+import { ApiError, NetworkUnavailableError } from '../../services/apiClient';
 import { colors, radius, spacing, typography } from '../../constants/theme';
 
 /**
  * Request statuses the backend still allows the user to cancel from
  * (`_USER_CANCELLABLE_STATUSES` in `backend/app/api/requests.py`). Used
- * here only to decide whether the Cancel button/"active" styling shows —
- * actually calling backend cancellation is Phase 6B-6's scope, not this
- * one's.
+ * to decide whether the Cancel button/"active" styling shows, and — as
+ * of Phase 6B-6 — matches the same set the backend enforces server-side
+ * for the real `POST /requests/{id}/cancel` call this screen now makes.
  */
 const CANCELLABLE_STATUSES: LocalServiceRequest['status'][] = ['PENDING', 'MATCHING', 'ASSIGNED', 'ACCEPTED'];
+
+/**
+ * Turns a `cancelRequest` failure (that isn't the 409 "no longer
+ * cancellable" case, which is reconciled via `loadRequests` instead)
+ * into a safe, user-facing message — same pattern as
+ * `describeSubmitError` in `confirm-request.tsx` and
+ * `describeLoadRequestsError` in `RequestsContext.tsx`.
+ */
+function describeCancelError(err: unknown): string {
+  if (err instanceof ApiError || err instanceof NetworkUnavailableError) {
+    return err.message;
+  }
+  return 'Something went wrong while cancelling your request. Please try again.';
+}
 
 /**
  * Reachable from User Home. Lists the authenticated user's real requests
@@ -31,6 +46,12 @@ export default function OngoingRequestsScreen() {
   const { session, logout } = useAuth();
   const { requests, loadState, loadError, loadRequests, cancelRequest } = useRequests();
   const [cancelTargetId, setCancelTargetId] = useState<string | null>(null);
+  // Tracks the one request currently being cancelled (if any) — disables
+  // that specific card's Cancel button so the same in-flight cancellation
+  // can't be submitted twice. Not shared/context state: purely this
+  // screen's own transient UI concern.
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   useEffect(() => {
     loadRequests();
@@ -41,9 +62,32 @@ export default function OngoingRequestsScreen() {
     router.replace('/role-selection');
   };
 
-  const handleConfirmCancel = () => {
-    if (cancelTargetId) cancelRequest(cancelTargetId);
+  const handleConfirmCancel = async () => {
+    if (!cancelTargetId || cancellingId) return;
+    const targetId = cancelTargetId;
     setCancelTargetId(null);
+    setCancellingId(targetId);
+    setCancelError(null);
+
+    try {
+      await cancelRequest(targetId);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        // Our local view of this request's status is stale — it's no
+        // longer cancellable server-side (someone/something moved it
+        // further along, or it was already cancelled). Don't fabricate a
+        // status; reconcile with the backend instead. loadRequests()
+        // never throws — on failure it sets its own loadState/loadError,
+        // which the screen already renders (error card + Retry), so a
+        // failed reconciliation surfaces as a real error rather than
+        // being silently treated as success.
+        await loadRequests();
+      } else {
+        setCancelError(describeCancelError(err));
+      }
+    } finally {
+      setCancellingId(null);
+    }
   };
 
   // A pull-to-refresh reload keeps the existing list visible while it
@@ -68,6 +112,13 @@ export default function OngoingRequestsScreen() {
       >
         <Text style={styles.title}>Ongoing Requests</Text>
         <Text style={styles.subtitle}>Track and manage your service requests.</Text>
+
+        {cancelError ? (
+          <View style={styles.errorCard}>
+            <Ionicons name="close-circle-outline" size={18} color={colors.error} />
+            <Text style={styles.errorCardText}>{cancelError}</Text>
+          </View>
+        ) : null}
 
         {isInitialLoading ? (
           <View style={styles.centerState}>
@@ -97,6 +148,7 @@ export default function OngoingRequestsScreen() {
             <RequestCard
               key={request.requestId}
               request={request}
+              isCancelling={cancellingId === request.requestId}
               onCancel={() => setCancelTargetId(request.requestId)}
             />
           ))
@@ -125,10 +177,11 @@ export default function OngoingRequestsScreen() {
 
 interface RequestCardProps {
   request: LocalServiceRequest;
+  isCancelling: boolean;
   onCancel: () => void;
 }
 
-function RequestCard({ request, onCancel }: RequestCardProps) {
+function RequestCard({ request, isCancelling, onCancel }: RequestCardProps) {
   const isCancelled = request.status === 'CANCELLED_BY_USER';
   const isActive = CANCELLABLE_STATUSES.includes(request.status);
 
@@ -159,8 +212,16 @@ function RequestCard({ request, onCancel }: RequestCardProps) {
       </View>
 
       {isActive ? (
-        <Pressable style={styles.cancelButton} onPress={onCancel}>
-          <Text style={styles.cancelButtonText}>Cancel Request</Text>
+        <Pressable
+          style={[styles.cancelButton, isCancelling && styles.cancelButtonDisabled]}
+          onPress={onCancel}
+          disabled={isCancelling}
+        >
+          {isCancelling ? (
+            <ActivityIndicator color={colors.error} size="small" />
+          ) : (
+            <Text style={styles.cancelButtonText}>Cancel Request</Text>
+          )}
         </Pressable>
       ) : null}
     </View>
@@ -241,6 +302,24 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 13,
   },
+  errorCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    backgroundColor: '#FCEBEB',
+    borderWidth: 1,
+    borderColor: colors.error,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  errorCardText: {
+    flex: 1,
+    fontSize: 12,
+    color: colors.error,
+    lineHeight: 17,
+    fontWeight: '600',
+  },
   card: {
     borderWidth: 1,
     borderColor: colors.border,
@@ -301,6 +380,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     alignItems: 'center',
     marginTop: spacing.sm,
+  },
+  cancelButtonDisabled: {
+    opacity: 0.6,
   },
   cancelButtonText: {
     color: colors.error,

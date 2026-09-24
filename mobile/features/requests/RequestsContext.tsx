@@ -125,7 +125,7 @@ interface RequestsContextValue {
   loadError: string | null;
   loadRequests: () => Promise<void>;
   submitRequest: (input: SubmitRequestInput) => Promise<LocalServiceRequest>;
-  cancelRequest: (requestId: string) => void;
+  cancelRequest: (requestId: string) => Promise<void>;
   getRequest: (requestId: string) => LocalServiceRequest | undefined;
 }
 
@@ -149,8 +149,18 @@ const RequestsContext = createContext<RequestsContextValue | undefined>(undefine
  * naturally superseded rather than duplicated once a load succeeds).
  * `submitRequest`'s immediate local insert is unchanged and still lets
  * `request-submitted.tsx` display the new request without waiting on a
- * `GET /requests` round-trip. `cancelRequest` remains local-only —
- * `POST /requests/{id}/cancel` is out of this phase's scope.
+ * `GET /requests` round-trip.
+ *
+ * Phase 6B-6: `cancelRequest` now calls the real, authenticated
+ * `POST /requests/{id}/cancel` (same `apiClient.request<T>()` +
+ * `authService.getAccessToken()` pattern as `submitRequest`/
+ * `loadRequests` — no second HTTP/error abstraction). It never updates
+ * local state before the backend confirms the cancellation, and on
+ * success it only patches the one affected row's `status`/`updatedAt` —
+ * a full `GET /requests` reload isn't needed for that case. Reconciling
+ * with the backend on a 409 (the request turned out not to be
+ * cancellable anymore) is the caller's responsibility via the existing
+ * `loadRequests()`, not something this function does itself.
  */
 export function RequestsProvider({ children }: { children: React.ReactNode }) {
   const [requests, setRequests] = useState<LocalServiceRequest[]>([]);
@@ -252,10 +262,25 @@ export function RequestsProvider({ children }: { children: React.ReactNode }) {
     return newRequest;
   }, []);
 
-  const cancelRequest = useCallback((requestId: string) => {
+  const cancelRequest = useCallback(async (requestId: string): Promise<void> => {
+    const token = await getAccessToken();
+    const response = await apiRequest<ServiceRequest>(`/requests/${requestId}/cancel`, {
+      method: 'POST',
+      token,
+    });
+
+    // Backend is authoritative for this row. Cancellation never changes
+    // serviceId/associationId/requestedDateTime, so the existing UI-only
+    // serviceName/associationName/dateTimeLabel are simply left as-is —
+    // only the two backend-owned fields the cancel actually changed
+    // (status, updatedAt) are patched in. No optimistic update happens
+    // before this point: this function is only ever called after the
+    // request has already resolved successfully.
     setRequests((previous) =>
       previous.map((request) =>
-        request.requestId === requestId ? { ...request, status: 'CANCELLED_BY_USER' } : request
+        request.requestId === response.id
+          ? { ...request, status: response.status, updatedAt: response.updatedAt }
+          : request
       )
     );
   }, []);
