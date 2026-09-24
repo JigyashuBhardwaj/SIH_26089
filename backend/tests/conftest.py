@@ -88,6 +88,7 @@ from app.models import (  # noqa: E402
     ServiceRequestStatus,
     UserProfile,
     Worker,
+    WorkerSkill,
     WorkerStatus,
 )
 
@@ -238,6 +239,20 @@ def make_worker(db_session):
         return worker
 
     return _make_worker
+
+
+@pytest.fixture()
+def make_worker_skill(db_session):
+    """Factory fixture: link a `Worker` to a `Service` via `WorkerSkill` (Phase 5E-E)."""
+
+    def _make_worker_skill(*, worker_id, service_id) -> WorkerSkill:
+        worker_skill = WorkerSkill(worker_id=worker_id, service_id=service_id)
+        db_session.add(worker_skill)
+        db_session.flush()
+        db_session.refresh(worker_skill)
+        return worker_skill
+
+    return _make_worker_skill
 
 
 @pytest.fixture()
