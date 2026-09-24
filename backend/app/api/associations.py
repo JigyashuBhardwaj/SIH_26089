@@ -17,6 +17,14 @@ Phase 5E-E adds the one manual-assignment write operation:
     automatic worker selection/ranking, and Assignment history is
     append-only (a new row is always added, never overwritten).
 
+Phase 5E-H adds one more READ-ONLY operation:
+
+`GET /associations/me/requests/{request_id}/candidates` — list eligible
+    Workers for a ServiceRequest in a deterministic ranking order, so the
+    admin can decide who to manually assign via the endpoint above. This
+    endpoint never creates, modifies, or selects an Assignment, and never
+    mutates the ServiceRequest — it only reads and ranks.
+
 Scope is always derived from the authenticated Account's own
 `association_id` column — never from a client-supplied id.
 """
@@ -24,7 +32,7 @@ Scope is always derived from the authenticated Account's own
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.api.errors import conflict, not_found
@@ -37,6 +45,7 @@ from app.models.service_request import ServiceRequest
 from app.models.worker import Worker
 from app.models.worker_skill import WorkerSkill
 from app.schemas.assignment import AssignmentCreate, AssignmentPublic
+from app.schemas.candidate import CandidateListResponse, CandidatePublic
 from app.schemas.pagination import PaginationParams
 from app.schemas.request import ServiceRequestListResponse, ServiceRequestPublic
 from app.schemas.worker import WorkerListResponse, WorkerPublic
@@ -286,3 +295,160 @@ def create_assignment(
     db.refresh(assignment)
 
     return AssignmentPublic.model_validate(assignment)
+
+
+@router.get(
+    "/me/requests/{request_id}/candidates",
+    response_model=CandidateListResponse,
+)
+def list_candidates_for_request(
+    request_id: UUID,
+    pagination: PaginationParams = Depends(),
+    db: Session = Depends(get_db),
+    account: Account = Depends(require_role(AccountRole.ASSOCIATION_ADMIN)),
+) -> CandidateListResponse:
+    """
+    Phase 5E-H: read-only candidate discovery for a ServiceRequest
+    belonging to the authenticated admin's own association. Returns
+    eligible Workers in a deterministic ranking order so the admin can
+    decide who to assign — it never creates, modifies, or auto-selects an
+    Assignment, and never mutates the ServiceRequest. The admin still
+    calls the existing `POST .../assignments` endpoint above to actually
+    assign a chosen worker.
+
+    Eligibility — a Worker qualifies only if ALL of:
+      1. Worker.association_id == the request's association_id (workers
+         from another association never appear).
+      2. Worker.status == ACTIVE (inactive workers are excluded).
+      3. The Worker has a WorkerSkill for the request's service_id.
+      4. No availability conflict: the Worker has no OTHER Assignment
+         (i.e. not one on this same request) with status PENDING_RESPONSE
+         or ACCEPTED whose own ServiceRequest shares this request's exact
+         `requested_date_time`. DECLINED/CANCELLED_BY_WORKER/COMPLETED
+         assignments never conflict. There is deliberately no leave or
+         service-duration model yet, so this same-datetime check is the
+         full extent of availability logic in this phase.
+      5. Worker.pincode is NEVER an eligibility filter — a different
+         pincode only affects ranking (below), never exclusion. Pincodes
+         are compared for exact equality only; this is not a distance or
+         geocoding calculation.
+
+    Ranking — deterministic lexicographic ordering, no weighted score:
+      1. same pincode as the request first
+      2. fewer active (PENDING_RESPONSE/ACCEPTED) assignments first
+      3. higher rating first
+      4. Worker.id ascending, as the final deterministic tiebreaker
+    `total_jobs_completed` and `worker_code` are never ranking factors.
+
+    Only a request currently PENDING or MATCHING can be searched for
+    candidates; any other status (it already has an active assignment, or
+    has moved past matching entirely) returns 409.
+    """
+    association_id = _require_own_association_id(account)
+
+    service_request = db.execute(
+        select(ServiceRequest).where(ServiceRequest.id == request_id)
+    ).scalar_one_or_none()
+
+    # A nonexistent request and one belonging to another association are
+    # indistinguishable (both 404) — never leak cross-association info.
+    if service_request is None or service_request.association_id != association_id:
+        raise not_found("Service request not found")
+
+    if service_request.status not in (
+        ServiceRequestStatus.PENDING,
+        ServiceRequestStatus.MATCHING,
+    ):
+        raise conflict("Service request is not in a state that can be matched")
+
+    # Availability conflict: an active Assignment (on some OTHER request)
+    # belonging to this worker, whose own ServiceRequest shares this
+    # request's exact requested_date_time. Correlated to the outer
+    # `Worker` row and evaluated by the database itself as part of the
+    # single query below — never a per-worker Python-side round trip.
+    conflicting_assignment_exists = (
+        select(Assignment.id)
+        .join(ServiceRequest, Assignment.request_id == ServiceRequest.id)
+        .where(
+            Assignment.worker_id == Worker.id,
+            Assignment.status.in_(_ACTIVE_ASSIGNMENT_STATUSES),
+            Assignment.request_id != service_request.id,
+            ServiceRequest.requested_date_time == service_request.requested_date_time,
+        )
+        .correlate(Worker)
+        .exists()
+    )
+
+    has_required_skill = (
+        select(WorkerSkill.worker_id)
+        .where(
+            WorkerSkill.worker_id == Worker.id,
+            WorkerSkill.service_id == service_request.service_id,
+        )
+        .correlate(Worker)
+        .exists()
+    )
+
+    # Total count of ALL of this worker's currently active assignments
+    # (not limited to the same datetime) — this is the "workload" ranking
+    # factor, distinct from the availability conflict check above.
+    active_assignment_count = (
+        select(func.count(Assignment.id))
+        .where(
+            Assignment.worker_id == Worker.id,
+            Assignment.status.in_(_ACTIVE_ASSIGNMENT_STATUSES),
+        )
+        .correlate(Worker)
+        .scalar_subquery()
+    )
+
+    is_same_pincode = Worker.pincode == service_request.pincode
+
+    eligibility_filters = (
+        Worker.association_id == association_id,
+        Worker.status == WorkerStatus.ACTIVE,
+        has_required_skill,
+        ~conflicting_assignment_exists,
+    )
+
+    total = db.execute(
+        select(func.count()).select_from(
+            select(Worker.id).where(*eligibility_filters).subquery()
+        )
+    ).scalar_one()
+
+    rows = db.execute(
+        select(Worker, active_assignment_count.label("active_assignment_count"))
+        .where(*eligibility_filters)
+        .order_by(
+            case((is_same_pincode, 0), else_=1).asc(),
+            active_assignment_count.asc(),
+            Worker.rating.desc(),
+            Worker.id.asc(),
+        )
+        .offset(pagination.offset)
+        .limit(pagination.page_size)
+    ).all()
+
+    items = [
+        CandidatePublic(
+            worker_id=worker.id,
+            worker_code=worker.worker_code,
+            full_name=worker.full_name,
+            phone=worker.phone,
+            address=worker.address,
+            pincode=worker.pincode,
+            rating=worker.rating,
+            total_jobs_completed=worker.total_jobs_completed,
+            active_assignment_count=active_count,
+            same_pincode=(worker.pincode == service_request.pincode),
+        )
+        for worker, active_count in rows
+    ]
+
+    return CandidateListResponse(
+        items=items,
+        page=pagination.page,
+        page_size=pagination.page_size,
+        total=total,
+    )
