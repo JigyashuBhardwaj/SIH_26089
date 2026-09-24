@@ -1,10 +1,26 @@
 import type { Role } from '@shared/auth';
 
 /**
- * Demo/local admin accounts for this prototype. There is no backend yet
- * — see `features/auth/AuthContext.tsx` for how this is consumed. Same
- * "mock now, real later" reasoning as the mobile app's `authService.ts`:
- * only this file's internals need to change once a real backend exists.
+ * Demo/local admin account DISPLAY DATA for this prototype.
+ *
+ * Phase 6A: authentication itself is now real — `features/auth/AuthContext.tsx`
+ * calls the actual backend `POST /auth/login`/`GET /auth/me` via
+ * `services/authService.ts`, not `findFederationAccount`/
+ * `findAssociationAccount` below. This file is kept as the source of
+ * *display* fields (association name, worker count, rating, coverage,
+ * federation display name, ...) that the dashboard/worker-list UI reads
+ * but that have no equivalent on the real backend at all: the backend
+ * `Association` model only has `id`/`federation_id`/`name` (no rating,
+ * worker count, or coverage — see `backend/app/schemas/association.py`),
+ * and the real `Account`/login response has no display name field.
+ * `getAssociationDisplayByLoginId`/`getFederationDisplayByLoginId` below
+ * are the mapping layer that resolves a real, authenticated account's
+ * `loginId` to this display data, since it happens to describe exactly
+ * the same demo dataset the backend's Phase 5F seed script creates.
+ * `findFederationAccount`/`findAssociationAccount` (the old
+ * password-checking lookups) are left in place, unused by AuthContext
+ * now, in case something else in this file's history still references
+ * them — see the exported functions' own docs for which is which.
  *
  * These are FICTIONAL demo accounts — no real-world affiliation implied.
  */
@@ -12,7 +28,22 @@ import type { Role } from '@shared/auth';
 export interface AssociationAccount {
   role: Extract<Role, 'ASSOCIATION_ADMIN'>;
   loginId: string;
-  password: string;
+  /**
+   * Optional: present on the static demo fixtures below, absent when
+   * this shape is built from a real, already-authenticated backend
+   * account (Phase 6A) — the real password is never held anywhere on
+   * the client past the login request itself.
+   */
+  password?: string;
+  /**
+   * DISPLAY/PROTOTYPE id only, in this static catalogue's own format
+   * (e.g. `'dhanbad_skilled'`) — never the real backend `Association`
+   * UUID. When this shape is built from a real, authenticated backend
+   * account (Phase 6A, see `features/auth/AuthContext.tsx`'s
+   * `toDisplayAccount`), the authoritative backend id is
+   * `account.associationId` on that real account, a separate value this
+   * field must not be confused with or read as if it were.
+   */
   associationId: string;
   associationName: string;
   services: string[];
@@ -26,7 +57,8 @@ export interface AssociationAccount {
 export interface FederationAccount {
   role: Extract<Role, 'FEDERATION_ADMIN'>;
   loginId: string;
-  password: string;
+  /** Optional — see `AssociationAccount.password`. */
+  password?: string;
   name: string;
 }
 
@@ -101,4 +133,25 @@ export function findAssociationAccount(loginId: string, password: string): Assoc
     throw new Error('Invalid ID or password.');
   }
   return account;
+}
+
+/**
+ * Phase 6A mapping layer: display data for a real, already-authenticated
+ * Association account, looked up by `loginId` alone (no password check —
+ * the real backend already verified the password). Returns `null` for a
+ * login_id the static demo dataset doesn't describe (e.g. a genuine
+ * future non-demo association account), so the caller can fall back to
+ * safe placeholder values instead of crashing.
+ */
+export function getAssociationDisplayByLoginId(loginId: string): AssociationAccount | null {
+  return DEMO_ACCOUNTS.find(
+    (entry): entry is AssociationAccount => entry.role === 'ASSOCIATION_ADMIN' && entry.loginId === loginId
+  ) ?? null;
+}
+
+/** Same as `getAssociationDisplayByLoginId`, but for Federation accounts. */
+export function getFederationDisplayByLoginId(loginId: string): FederationAccount | null {
+  return DEMO_ACCOUNTS.find(
+    (entry): entry is FederationAccount => entry.role === 'FEDERATION_ADMIN' && entry.loginId === loginId
+  ) ?? null;
 }

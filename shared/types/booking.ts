@@ -32,18 +32,27 @@ export type ServiceRequestStatus =
  * that history must be preserved rather than overwritten. To find the
  * current or historical worker(s) for a request, look up Assignment
  * records where `Assignment.requestId` matches this request's `id`.
+ *
+ * Phase 6A: corrected to match the actual backend `ServiceRequestPublic`
+ * response (`backend/app/schemas/request.py`) exactly — that response
+ * deliberately never includes `userId` (a caller only ever sees their
+ * own requests, so it's redundant, and the schema's own docstring notes
+ * it's omitted on purpose), and the requested-time field is named
+ * `requestedDateTime` on the backend, not `requestedServiceTime`.
+ * Nothing in `mobile/` or `admin/` consumed this interface at the time
+ * of this correction, so this is a type-only change with no behavior
+ * impact.
  */
 export interface ServiceRequest {
   id: string;
   requestCode: string;
-  userId: string;
   associationId: string;
   serviceId: string;
   status: ServiceRequestStatus;
   address: string;
   pincode: string;
   /** ISO timestamp of the requested service time. */
-  requestedServiceTime: string;
+  requestedDateTime: string;
   /** ISO timestamp of when the request was created. */
   createdAt: string;
   /** ISO timestamp of the most recent status/field change. */
@@ -70,4 +79,6 @@ export interface Assignment {
   assignedAt: string;
   /** ISO timestamp of when the worker responded (accepted/declined), or null if still pending. */
   respondedAt: string | null;
+  /** ISO timestamp of the most recent status change (Phase 6A: added to match backend `AssignmentPublic`). */
+  updatedAt: string;
 }

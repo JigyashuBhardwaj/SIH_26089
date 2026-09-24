@@ -30,7 +30,10 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
+# local env files (Phase 6A: mobile/.env, admin/.env, and backend/.env
+# all contain real secrets/URLs derived from the committed .env.example
+# files and must never be committed — only .env.example files should be)
+.env
 .env*.local
 
 # typescript

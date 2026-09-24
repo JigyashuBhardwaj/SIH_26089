@@ -8,8 +8,12 @@ interface PortalLoginFormProps {
   portalTitle: string;
   idFieldLabel: string;
   demoHint: string;
-  /** Throws with a user-facing message on invalid credentials. */
-  onLogin: (loginId: string, password: string) => void;
+  /**
+   * Rejects with a user-facing message on invalid credentials or a
+   * connection problem (Phase 6A: this now calls the real backend, so
+   * it's async where it used to be synchronous).
+   */
+  onLogin: (loginId: string, password: string) => Promise<void>;
   showRegisterLink?: boolean;
 }
 
@@ -29,8 +33,9 @@ export function PortalLoginForm({ portalTitle, idFieldLabel, demoHint, onLogin, 
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [comingSoonOpen, setComingSoonOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (event: FormEvent) => {
+  const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setError(null);
 
@@ -39,11 +44,14 @@ export function PortalLoginForm({ portalTitle, idFieldLabel, demoHint, onLogin, 
       return;
     }
 
+    setIsSubmitting(true);
     try {
-      onLogin(loginId.trim(), password);
+      await onLogin(loginId.trim(), password);
       navigate('/dashboard', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid ID or password.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -95,8 +103,8 @@ export function PortalLoginForm({ portalTitle, idFieldLabel, demoHint, onLogin, 
 
           {error ? <p className={styles.error}>{error}</p> : null}
 
-          <button type="submit" className={styles.submitButton}>
-            Login
+          <button type="submit" className={styles.submitButton} disabled={isSubmitting}>
+            {isSubmitting ? 'Logging in…' : 'Login'}
           </button>
 
           {showRegisterLink ? (
