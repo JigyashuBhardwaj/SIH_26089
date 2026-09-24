@@ -13,6 +13,7 @@ phases.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.assignments import router as assignments_router
 from app.api.associations import router as associations_router
 from app.api.auth import router as auth_router
 from app.api.federation import router as federation_router
@@ -39,8 +40,13 @@ app = FastAPI(
         "(/associations/me/workers, /associations/me/requests, "
         "/associations/me/requests/{request_id}, /workers/me, "
         "/workers/me/assignments, /federation/me/associations, "
-        "/federation/me/workers) — no mutation, matching, or assignment "
-        "creation anywhere in this phase."
+        "/federation/me/workers). Phase 5E-E: the association-admin "
+        "manual-assignment write "
+        "(POST /associations/me/requests/{request_id}/assignments). "
+        "Phase 5E-F-A: the worker's own assignment-response lifecycle "
+        "(POST /assignments/{assignment_id}/accept, .../decline, "
+        ".../cancel) — no matching, worker completion, user "
+        "confirmation, or payment anywhere in this phase."
     ),
 )
 
@@ -59,6 +65,7 @@ app.include_router(requests_router)
 app.include_router(associations_router)
 app.include_router(workers_router)
 app.include_router(federation_router)
+app.include_router(assignments_router)
 
 
 @app.get("/health")
