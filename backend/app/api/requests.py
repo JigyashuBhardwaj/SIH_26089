@@ -29,6 +29,23 @@ reads or writes the `Assignment` table at all — Assignment history is
 untouched by both. `pay` is a demo/MVP action only: there is no Payment
 model/table and no real payment gateway integration anywhere in this
 codebase.
+
+Phase 5E-J adds the one remaining USER-side mutation, user-initiated
+cancellation:
+
+`POST /requests/{request_id}/cancel` — {PENDING, MATCHING, ASSIGNED, ACCEPTED} -> CANCELLED_BY_USER
+
+Any other starting status (WORKER_COMPLETED, USER_CONFIRMED,
+PAYMENT_PENDING, PAID, COMPLETED, or an already-CANCELLED_BY_USER
+request) is rejected with 409 — cancellation is only meaningful before
+the worker has finished the job. Like `confirm`/`pay`, this route never
+reads or writes the `Assignment` table: a cancelled request's Assignment
+history (including a currently-ACCEPTED row, if one exists) is left
+completely untouched — no status change, no new row, no reassignment.
+CANCELLED_BY_USER is a `ServiceRequestStatus` value only; it is
+deliberately distinct from `AssignmentStatus.CANCELLED_BY_WORKER`
+(worker-initiated, handled entirely by `app/api/assignments.py`) and no
+new `AssignmentStatus` value is introduced here.
 """
 
 from uuid import UUID
@@ -254,6 +271,56 @@ def pay_for_request(
         raise conflict("Service request is not awaiting payment")
 
     service_request.status = ServiceRequestStatus.COMPLETED
+
+    db.flush()
+    db.refresh(service_request)
+
+    return ServiceRequestPublic.model_validate(service_request)
+
+
+# ServiceRequest statuses from which the owning USER may still cancel.
+# Anything else (WORKER_COMPLETED onward, or an already-cancelled
+# request) means the job is too far along for the user to unilaterally
+# call it off, and is rejected with 409.
+_USER_CANCELLABLE_STATUSES = (
+    ServiceRequestStatus.PENDING,
+    ServiceRequestStatus.MATCHING,
+    ServiceRequestStatus.ASSIGNED,
+    ServiceRequestStatus.ACCEPTED,
+)
+
+
+@router.post("/{request_id}/cancel", response_model=ServiceRequestPublic)
+def cancel_request(
+    request_id: UUID,
+    db: Session = Depends(get_db),
+    account: Account = Depends(require_role(AccountRole.USER)),
+) -> ServiceRequestPublic:
+    """
+    The authenticated user cancels their own ServiceRequest (Phase
+    5E-J). Allowed only from PENDING, MATCHING, ASSIGNED, or ACCEPTED —
+    any later status (WORKER_COMPLETED, USER_CONFIRMED, PAYMENT_PENDING,
+    PAID, COMPLETED) or an already-CANCELLED_BY_USER request is rejected
+    with 409, since the job is either already finished or already
+    cancelled.
+
+    This route never reads or writes the `Assignment` table at all.
+    Whatever Assignment history exists for this request — including a
+    currently-ACCEPTED row, if the request was ACCEPTED — is left
+    completely untouched: no status change, no new Assignment, no
+    automatic reassignment. `CANCELLED_BY_WORKER` (a worker declining
+    their own already-accepted job, handled entirely by
+    `app/api/assignments.py`'s `cancel_assignment`) is a distinct,
+    Assignment-level status; this endpoint only ever sets the
+    ServiceRequest-level `CANCELLED_BY_USER`.
+    """
+    profile = _get_own_user_profile(db, account)
+    service_request = _lock_own_request(db, profile, request_id)
+
+    if service_request.status not in _USER_CANCELLABLE_STATUSES:
+        raise conflict("Service request is not in a state that can be cancelled")
+
+    service_request.status = ServiceRequestStatus.CANCELLED_BY_USER
 
     db.flush()
     db.refresh(service_request)
