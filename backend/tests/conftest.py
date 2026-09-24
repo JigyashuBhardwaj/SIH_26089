@@ -74,12 +74,18 @@ from app.auth.security import create_access_token, hash_password  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.database import Base, engine, get_db  # noqa: E402
 from app.main import app  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
 from app.models import (  # noqa: E402
     Account,
     AccountRole,
+    Assignment,
+    AssignmentStatus,
     Association,
     Federation,
     Service,
+    ServiceRequest,
+    ServiceRequestStatus,
     UserProfile,
     Worker,
     WorkerStatus,
@@ -274,6 +280,69 @@ def make_user_profile(db_session):
         return profile
 
     return _make_user_profile
+
+
+@pytest.fixture()
+def make_service_request(db_session):
+    """
+    Factory fixture: create a temporary `ServiceRequest` row directly
+    (Phase 5E-D). Constructs the ORM row directly rather than going
+    through `POST /requests`, so it deliberately bypasses that endpoint's
+    own lead-time validation — callers can pass any `requested_date_time`
+    they need for ordering/isolation tests.
+    """
+
+    def _make_service_request(
+        *,
+        user_id,
+        service_id,
+        association_id,
+        requested_date_time: datetime | None = None,
+        address: str = "12 MG Road",
+        pincode: str = "560001",
+        status: ServiceRequestStatus = ServiceRequestStatus.PENDING,
+    ) -> ServiceRequest:
+        service_request = ServiceRequest(
+            user_id=user_id,
+            service_id=service_id,
+            association_id=association_id,
+            requested_date_time=requested_date_time
+            or (datetime.now(timezone.utc) + timedelta(hours=5)),
+            address=address,
+            pincode=pincode,
+            status=status,
+        )
+        db_session.add(service_request)
+        db_session.flush()
+        db_session.refresh(service_request)
+        return service_request
+
+    return _make_service_request
+
+
+@pytest.fixture()
+def make_assignment(db_session):
+    """Factory fixture: create a temporary `Assignment` row for this test (Phase 5E-D)."""
+
+    def _make_assignment(
+        *,
+        request_id,
+        worker_id,
+        assigned_by,
+        status: AssignmentStatus = AssignmentStatus.PENDING_RESPONSE,
+    ) -> Assignment:
+        assignment = Assignment(
+            request_id=request_id,
+            worker_id=worker_id,
+            assigned_by=assigned_by,
+            status=status,
+        )
+        db_session.add(assignment)
+        db_session.flush()
+        db_session.refresh(assignment)
+        return assignment
+
+    return _make_assignment
 
 
 @pytest.fixture()

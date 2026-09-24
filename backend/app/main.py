@@ -13,10 +13,13 @@ phases.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.associations import router as associations_router
 from app.api.auth import router as auth_router
+from app.api.federation import router as federation_router
 from app.api.requests import router as requests_router
 from app.api.services import router as services_router
 from app.api.users import router as users_router
+from app.api.workers import router as workers_router
 from app.config import get_settings
 
 settings = get_settings()
@@ -31,7 +34,13 @@ app = FastAPI(
         "user's own profile (/users/me). Phase 5E-C: the authenticated "
         "USER's own ServiceRequests (/requests, /requests/{request_id}) "
         "— creation only, always starting at PENDING; no matching, "
-        "assignment, or lifecycle transitions yet."
+        "assignment, or lifecycle transitions yet. Phase 5E-D: read-only "
+        "association-admin, worker, and federation-admin views "
+        "(/associations/me/workers, /associations/me/requests, "
+        "/associations/me/requests/{request_id}, /workers/me, "
+        "/workers/me/assignments, /federation/me/associations, "
+        "/federation/me/workers) — no mutation, matching, or assignment "
+        "creation anywhere in this phase."
     ),
 )
 
@@ -47,6 +56,9 @@ app.include_router(auth_router)
 app.include_router(services_router)
 app.include_router(users_router)
 app.include_router(requests_router)
+app.include_router(associations_router)
+app.include_router(workers_router)
+app.include_router(federation_router)
 
 
 @app.get("/health")
