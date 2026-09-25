@@ -23,6 +23,24 @@ export { ApiError, NetworkUnavailableError };
 export type AdminRole = Extract<Role, 'ASSOCIATION_ADMIN' | 'FEDERATION_ADMIN'>;
 
 /**
+ * Same storage key `AuthContext.tsx` persists the JWT under
+ * (`TOKEN_STORAGE_KEY` there). Duplicated here (rather than imported)
+ * because `AuthContext.tsx` imports from this module, not the other way
+ * around — this file stays the lower-level layer.
+ */
+const TOKEN_STORAGE_KEY = 'karmanya_admin_access_token';
+
+/**
+ * Reads the currently persisted Admin JWT, if any. Phase 6C: added so
+ * feature services (e.g. `associationRequestsService.ts`) can attach the
+ * existing session's token without reimplementing another HTTP/auth
+ * abstraction or reaching into `AuthContext` internals.
+ */
+export function getAccessToken(): string | null {
+  return localStorage.getItem(TOKEN_STORAGE_KEY);
+}
+
+/**
  * The real, authenticated account identity — everything the backend
  * actually knows. `associationId`/`federationId` here are the
  * AUTHORITATIVE backend UUIDs (straight from `AccountPublic`) — not to

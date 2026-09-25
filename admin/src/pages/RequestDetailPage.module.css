@@ -1,0 +1,235 @@
+.backLink {
+  background: none;
+  border: none;
+  color: var(--color-action-blue);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: 16px;
+}
+
+.title {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--color-text-primary);
+  margin: 0 0 4px;
+}
+
+.requestCode {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin: 0 0 20px;
+}
+
+.stateText {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.errorCard {
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 640px;
+  margin-bottom: 16px;
+}
+
+.errorText {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+
+.assignErrorText {
+  font-size: 13px;
+  color: #b3261e;
+  margin: 0 0 16px;
+}
+
+.retryButton {
+  background: var(--color-action-blue);
+  color: var(--color-white);
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.retryButton:hover {
+  background: var(--color-primary-blue);
+}
+
+.detailCard {
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  max-width: 640px;
+  margin-bottom: 20px;
+}
+
+.detailRow {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+
+.detailRow:last-child {
+  border-bottom: none;
+}
+
+.detailLabel {
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+.statusBadge {
+  display: inline-block;
+  background: var(--color-blue-tint);
+  color: var(--color-action-blue);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+}
+
+.infoCard {
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+  max-width: 640px;
+  margin-bottom: 20px;
+}
+
+.infoText {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.emptyCard {
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 24px;
+  max-width: 640px;
+}
+
+.emptyText {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.candidatesSection {
+  margin-top: 8px;
+}
+
+.primaryButton {
+  background: var(--color-action-blue);
+  color: var(--color-white);
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 10px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.primaryButton:hover {
+  background: var(--color-primary-blue);
+}
+
+.tableWrap {
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th {
+  text-align: left;
+  padding: 12px 16px;
+  color: var(--color-text-secondary);
+  font-weight: 700;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  vertical-align: middle;
+}
+
+.row:last-child td {
+  border-bottom: none;
+}
+
+.workerCell {
+  display: flex;
+  flex-direction: column;
+}
+
+.workerName {
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.workerCode {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.samePincodeBadge {
+  display: inline-block;
+  margin-left: 8px;
+  background: var(--color-green-tint);
+  color: var(--color-green);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+}
+
+.assignButton {
+  background: var(--color-action-blue);
+  color: var(--color-white);
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.assignButton:hover:not(:disabled) {
+  background: var(--color-primary-blue);
+}
+
+.assignButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

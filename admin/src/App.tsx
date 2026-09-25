@@ -6,6 +6,8 @@ import { AssociationsPage } from './pages/AssociationsPage';
 import { ComingSoonPage } from './pages/ComingSoonPage';
 import { FederationLoginPage } from './pages/FederationLoginPage';
 import { PortalSelectionPage } from './pages/PortalSelectionPage';
+import { RequestDetailPage } from './pages/RequestDetailPage';
+import { RequestsPage } from './pages/RequestsPage';
 import { WorkerDetailPage } from './pages/WorkerDetailPage';
 import { WorkersPage } from './pages/WorkersPage';
 
@@ -34,7 +36,15 @@ export default function App() {
         path="/requests"
         element={
           <ProtectedRoute>
-            <ComingSoonPage title="Requests" />
+            <RequestsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/requests/:requestId"
+        element={
+          <ProtectedRoute>
+            <RequestDetailPage />
           </ProtectedRoute>
         }
       />
