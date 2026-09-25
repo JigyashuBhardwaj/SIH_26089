@@ -68,6 +68,23 @@ export interface ServiceRequest {
  */
 export type AssignmentStatus = 'PENDING_RESPONSE' | 'ACCEPTED' | 'DECLINED' | 'CANCELLED_BY_WORKER' | 'COMPLETED';
 
+/**
+ * Phase 6E-A: a minimal, read-only snapshot of the ServiceRequest a
+ * Worker-facing Assignment belongs to — joined server-side from the
+ * existing ServiceRequest/Service tables (`backend/app/api/workers.py`'s
+ * `list_own_assignments`), never a second, independently-stored source
+ * of truth. Matches `backend/app/schemas/assignment.py`'s
+ * `AssignmentRequestSummary` field-for-field.
+ */
+export interface AssignmentRequestSummary {
+  requestCode: string;
+  serviceName: string;
+  /** ISO timestamp of the requested service time. */
+  requestedDateTime: string;
+  address: string;
+  pincode: string;
+}
+
 export interface Assignment {
   id: string;
   requestId: string;
@@ -81,4 +98,17 @@ export interface Assignment {
   respondedAt: string | null;
   /** ISO timestamp of the most recent status change (Phase 6A: added to match backend `AssignmentPublic`). */
   updatedAt: string;
+  /**
+   * Phase 6E-A: present only on `GET /workers/me/assignments` responses
+   * (`backend/app/schemas/assignment.py`'s `WorkerAssignmentPublic`) —
+   * every other Assignment-returning endpoint (accept/decline/cancel/
+   * complete, and the association-admin assignment-creation route)
+   * returns the plain, unenriched shape and this field is simply absent
+   * there. Optional here so this one shared interface still describes
+   * both shapes truthfully; a consumer that only ever sees the worker
+   * list (like `mobile/services/workerAssignments.ts`) can still rely on
+   * it being present in practice, but must handle `undefined` gracefully
+   * for defense-in-depth (e.g. an older cached value).
+   */
+  requestSummary?: AssignmentRequestSummary;
 }

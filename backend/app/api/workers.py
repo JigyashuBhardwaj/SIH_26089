@@ -8,11 +8,19 @@ history.
 Identity is always derived from the authenticated Account -> its own
 `Worker` row, never from a client-supplied id. READ-ONLY: no assignment
 creation, response (accept/decline), or status mutation happens here.
+
+Phase 6E-A enriches `GET /workers/me/assignments` with a small
+`requestSummary` per item (`app.schemas.assignment.WorkerAssignmentPublic`)
+so the Worker app can show real job information (service, requested
+date/time, address) instead of a synthetic placeholder — see that
+schema's own docstring for why this is a separate response type from the
+plain `AssignmentPublic` every other Assignment-returning route still
+uses unchanged.
 """
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.api.errors import not_found
 from app.auth.dependencies import require_role
@@ -20,8 +28,13 @@ from app.database import get_db
 from app.models.account import Account
 from app.models.assignment import Assignment
 from app.models.enums import AccountRole
+from app.models.service_request import ServiceRequest
 from app.models.worker import Worker
-from app.schemas.assignment import AssignmentListResponse, AssignmentPublic
+from app.schemas.assignment import (
+    AssignmentRequestSummary,
+    WorkerAssignmentListResponse,
+    WorkerAssignmentPublic,
+)
 from app.schemas.pagination import PaginationParams
 from app.schemas.worker import WorkerPublic
 
@@ -51,16 +64,21 @@ def get_own_worker_profile(
     return WorkerPublic.model_validate(worker)
 
 
-@router.get("/me/assignments", response_model=AssignmentListResponse)
+@router.get("/me/assignments", response_model=WorkerAssignmentListResponse)
 def list_own_assignments(
     pagination: PaginationParams = Depends(),
     db: Session = Depends(get_db),
     account: Account = Depends(require_role(AccountRole.WORKER)),
-) -> AssignmentListResponse:
+) -> WorkerAssignmentListResponse:
     """
     List only the authenticated worker's own Assignment history (no
     "active only" filter), ordered by `assigned_at DESC` with `id DESC`
     as a stable tiebreaker.
+
+    Phase 6E-A: each item also carries `requestSummary`, joined here
+    (`Assignment.request` -> `ServiceRequest.service`) in the same query
+    that fetches the page of assignments, rather than one extra query per
+    row.
     """
     worker = _get_own_worker(db, account)
 
@@ -72,7 +90,10 @@ def list_own_assignments(
 
     assignments = (
         db.execute(
-            base_query.order_by(Assignment.assigned_at.desc(), Assignment.id.desc())
+            base_query.options(
+                joinedload(Assignment.request).joinedload(ServiceRequest.service)
+            )
+            .order_by(Assignment.assigned_at.desc(), Assignment.id.desc())
             .offset(pagination.offset)
             .limit(pagination.page_size)
         )
@@ -80,8 +101,20 @@ def list_own_assignments(
         .all()
     )
 
-    return AssignmentListResponse(
-        items=[AssignmentPublic.model_validate(assignment) for assignment in assignments],
+    items: list[WorkerAssignmentPublic] = []
+    for assignment in assignments:
+        item = WorkerAssignmentPublic.model_validate(assignment)
+        item.request_summary = AssignmentRequestSummary(
+            request_code=assignment.request.request_code,
+            service_name=assignment.request.service.name,
+            requested_date_time=assignment.request.requested_date_time,
+            address=assignment.request.address,
+            pincode=assignment.request.pincode,
+        )
+        items.append(item)
+
+    return WorkerAssignmentListResponse(
+        items=items,
         page=pagination.page,
         page_size=pagination.page_size,
         total=total,

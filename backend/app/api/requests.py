@@ -58,11 +58,13 @@ from app.api.errors import conflict, not_found
 from app.auth.dependencies import require_role
 from app.database import get_db
 from app.models.account import Account
+from app.models.assignment import Assignment
 from app.models.association import Association
-from app.models.enums import AccountRole, ServiceRequestStatus
+from app.models.enums import AccountRole, AssignmentStatus, ServiceRequestStatus
 from app.models.service import Service
 from app.models.service_request import ServiceRequest
 from app.models.user_profile import UserProfile
+from app.models.worker import Worker
 from app.schemas.pagination import PaginationParams
 from app.schemas.request import (
     ServiceRequestCreate,
@@ -71,6 +73,65 @@ from app.schemas.request import (
 )
 
 router = APIRouter(prefix="/requests", tags=["requests"])
+
+# Phase 6E-A: an Assignment counts as the request's "currently relevant"
+# one for surfacing assigned-worker info to the USER only once a worker
+# has actually accepted -- ACCEPTED (job in progress) or COMPLETED (job
+# done, worker info still relevant through confirmation/payment).
+# Deliberately excludes PENDING_RESPONSE (offered but not yet accepted —
+# nothing to show the user yet) and DECLINED/CANCELLED_BY_WORKER
+# (superseded, never the "current" worker). Business rules elsewhere
+# guarantee at most one Assignment per request is ever in one of these
+# two statuses at a time, so this never needs to pick among several.
+_CURRENT_ASSIGNMENT_STATUSES = (AssignmentStatus.ACCEPTED, AssignmentStatus.COMPLETED)
+
+
+def _resolve_current_assignment_worker(db: Session, request_id: UUID) -> Worker | None:
+    """Single-request lookup of the currently relevant assigned Worker, or None."""
+    return db.execute(
+        select(Worker)
+        .join(Assignment, Assignment.worker_id == Worker.id)
+        .where(
+            Assignment.request_id == request_id,
+            Assignment.status.in_(_CURRENT_ASSIGNMENT_STATUSES),
+        )
+        .order_by(Assignment.assigned_at.desc(), Assignment.id.desc())
+        .limit(1)
+    ).scalars().first()
+
+
+def _attach_current_assignment_workers(
+    db: Session, service_requests: list[ServiceRequest]
+) -> dict[UUID, Worker]:
+    """
+    Batch version of `_resolve_current_assignment_worker` for a list
+    result (`list_own_requests`) -- one query for the whole page rather
+    than one per row.
+    """
+    if not service_requests:
+        return {}
+    request_ids = [service_request.id for service_request in service_requests]
+    rows = db.execute(
+        select(Assignment.request_id, Worker)
+        .join(Worker, Worker.id == Assignment.worker_id)
+        .where(
+            Assignment.request_id.in_(request_ids),
+            Assignment.status.in_(_CURRENT_ASSIGNMENT_STATUSES),
+        )
+    ).all()
+    return {request_id: worker for request_id, worker in rows}
+
+
+def _build_service_request_public(
+    service_request: ServiceRequest, worker: Worker | None
+) -> ServiceRequestPublic:
+    """Build a `ServiceRequestPublic`, attaching assigned-worker info if `worker` is given."""
+    public = ServiceRequestPublic.model_validate(service_request)
+    if worker is not None:
+        public.assigned_worker_id = worker.id
+        public.assigned_worker_name = worker.full_name
+        public.assigned_worker_phone = worker.phone
+    return public
 
 
 def _get_own_user_profile(db: Session, account: Account) -> UserProfile:
@@ -161,9 +222,13 @@ def list_own_requests(
         .all()
     )
 
+    workers_by_request_id = _attach_current_assignment_workers(db, service_requests)
+
     return ServiceRequestListResponse(
         items=[
-            ServiceRequestPublic.model_validate(service_request)
+            _build_service_request_public(
+                service_request, workers_by_request_id.get(service_request.id)
+            )
             for service_request in service_requests
         ],
         page=pagination.page,
@@ -194,7 +259,8 @@ def get_own_request(
     if service_request is None:
         raise not_found("Service request not found")
 
-    return ServiceRequestPublic.model_validate(service_request)
+    worker = _resolve_current_assignment_worker(db, service_request.id)
+    return _build_service_request_public(service_request, worker)
 
 
 def _lock_own_request(db: Session, profile: UserProfile, request_id: UUID) -> ServiceRequest:

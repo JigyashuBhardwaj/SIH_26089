@@ -138,7 +138,20 @@ def test_worker_can_list_own_assignments(
         "assignedAt",
         "respondedAt",
         "updatedAt",
+        "requestSummary",
     }
+    # Phase 6E-A: requestSummary is a real join of the assignment's own
+    # ServiceRequest/Service, not fabricated/duplicated data.
+    from datetime import datetime
+
+    summary = item["requestSummary"]
+    assert summary["requestCode"] == service_request.request_code
+    assert summary["serviceName"] == service.name
+    assert summary["address"] == service_request.address
+    assert summary["pincode"] == service_request.pincode
+    assert datetime.fromisoformat(summary["requestedDateTime"].replace("Z", "+00:00")) == (
+        service_request.requested_date_time
+    )
 
 
 def test_worker_does_not_see_other_worker_assignments(

@@ -34,12 +34,10 @@ function formatAssignedAtLabel(isoDateTime: string): string {
 /**
  * A short, human-scannable reference derived from the assignment's
  * `requestId` — NOT the same as the backend's own `REQ-xxxxx` request
- * code. `AssignmentPublic` (the only data this screen has access to for
- * a WORKER account — see the accompanying report's flagged limitation)
- * carries `requestId` as a UUID only; there is currently no
- * WORKER-accessible endpoint that resolves it to the real request code,
- * service name, or address. Labeled "Ref" (not "Request Code") so this
- * is never mistaken for that value.
+ * code. Used ONLY as a fallback when `assignment.requestSummary` is
+ * unavailable for some reason (e.g. an older cached value) — the normal
+ * case now uses the real `requestSummary.requestCode`/`serviceName`/etc,
+ * joined server-side as of Phase 6E-A (`GET /workers/me/assignments`).
  */
 function shortRequestRef(requestId: string): string {
   return requestId.slice(0, 8).toUpperCase();
@@ -221,19 +219,36 @@ interface AssignmentCardProps {
 }
 
 function AssignmentCard({ assignment, isActioning, onAccept, onDecline }: AssignmentCardProps) {
+  const summary = assignment.requestSummary;
+
   return (
     <View style={styles.card}>
       <View style={styles.cardHeaderRow}>
-        <Text style={styles.cardRef}>Ref: {shortRequestRef(assignment.requestId)}</Text>
+        <Text style={styles.cardRef}>
+          {summary ? summary.serviceName : `Ref: ${shortRequestRef(assignment.requestId)}`}
+        </Text>
         <View style={styles.statusBadge}>
           <Text style={styles.statusBadgeText}>Awaiting your response</Text>
         </View>
       </View>
 
+      {summary ? <Text style={styles.cardSubRef}>Ref: {summary.requestCode}</Text> : null}
+
       <View style={styles.cardDetailRow}>
-        <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
-        <Text style={styles.cardDetailText}>Offered {formatAssignedAtLabel(assignment.assignedAt)}</Text>
+        <Ionicons name="calendar-outline" size={14} color={colors.textSecondary} />
+        <Text style={styles.cardDetailText}>
+          {summary ? formatAssignedAtLabel(summary.requestedDateTime) : `Offered ${formatAssignedAtLabel(assignment.assignedAt)}`}
+        </Text>
       </View>
+
+      {summary ? (
+        <View style={styles.cardDetailRow}>
+          <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
+          <Text style={styles.cardDetailText}>
+            {summary.address} — {summary.pincode}
+          </Text>
+        </View>
+      ) : null}
 
       <View style={styles.actionRow}>
         <Pressable
@@ -359,6 +374,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
     color: colors.navy,
+  },
+  cardSubRef: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginBottom: spacing.sm,
   },
   statusBadge: {
     backgroundColor: colors.greenTint,

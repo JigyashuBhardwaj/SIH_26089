@@ -140,6 +140,12 @@ def test_create_response_has_exact_expected_shape(
         "status",
         "createdAt",
         "updatedAt",
+        # Phase 6E-A: always present, always null on a freshly-created
+        # (PENDING, no Assignment yet) request -- see the assertions in
+        # test_create_response_does_not_expose_assignment_info below.
+        "assignedWorkerId",
+        "assignedWorkerName",
+        "assignedWorkerPhone",
     }
 
 

@@ -81,6 +81,32 @@ export async function declineAssignment(assignmentId: string): Promise<Assignmen
   return request<Assignment>(`/assignments/${assignmentId}/decline`, { method: 'POST', token });
 }
 
+/**
+ * Phase 6E-A: cancels the authenticated worker's own already-ACCEPTED
+ * assignment (they can no longer perform the work). Returns the
+ * backend's authoritative, post-cancel `Assignment` (status
+ * `CANCELLED_BY_WORKER`) — same never-fabricate rule as
+ * `acceptAssignment`/`declineAssignment` above.
+ */
+export async function cancelAssignment(assignmentId: string): Promise<Assignment> {
+  const token = await getAccessToken();
+  return request<Assignment>(`/assignments/${assignmentId}/cancel`, { method: 'POST', token });
+}
+
+/**
+ * Phase 6E-A: marks the authenticated worker's own ACCEPTED assignment
+ * as the completed job ("Mark Work as Done"). Returns the backend's
+ * authoritative, post-complete `Assignment` (status `COMPLETED`) — the
+ * linked ServiceRequest moves to `WORKER_COMPLETED` on the backend as
+ * part of the same call, though that isn't reflected in this
+ * `Assignment` response itself (the User side handles what happens next
+ * separately, later, in `app/api/requests.py`).
+ */
+export async function completeAssignment(assignmentId: string): Promise<Assignment> {
+  const token = await getAccessToken();
+  return request<Assignment>(`/assignments/${assignmentId}/complete`, { method: 'POST', token });
+}
+
 /** Maps a `fetchOwnAssignments` failure to a safe, user-facing message. */
 export function describeFetchAssignmentsError(err: unknown): string {
   if (err instanceof ApiError || err instanceof NetworkUnavailableError) {
@@ -103,4 +129,20 @@ export function describeDeclineError(err: unknown): string {
     return err.message;
   }
   return 'Could not decline this request. Please try again.';
+}
+
+/** Maps a `cancelAssignment` failure (other than a 409, reconciled by re-fetching) to a safe message. */
+export function describeCancelError(err: unknown): string {
+  if (err instanceof ApiError || err instanceof NetworkUnavailableError) {
+    return err.message;
+  }
+  return 'Could not cancel this job. Please try again.';
+}
+
+/** Maps a `completeAssignment` failure (other than a 409, reconciled by re-fetching) to a safe message. */
+export function describeCompleteError(err: unknown): string {
+  if (err instanceof ApiError || err instanceof NetworkUnavailableError) {
+    return err.message;
+  }
+  return 'Could not mark this job as done. Please try again.';
 }

@@ -62,8 +62,20 @@ class ServiceRequestCreate(BaseModel):
 
 class ServiceRequestPublic(BaseModel):
     """
-    Safe, public view of a `ServiceRequest`. Never includes `user_id`,
-    worker/assignment information, or any authentication data.
+    Safe, public view of a `ServiceRequest`. Never includes `user_id` or
+    any authentication data.
+
+    Phase 6E-A adds minimal assigned-worker information
+    (`assignedWorkerId`/`assignedWorkerName`/`assignedWorkerPhone`) so
+    that a future User-facing screen can show who is coming, once there
+    is one -- see `app/api/requests.py`'s `_resolve_current_assignment_worker`/
+    `_attach_current_assignment_workers` for how these are derived (the
+    Worker of the request's currently ACCEPTED or COMPLETED Assignment,
+    never an arbitrary historical one). All three fields are `None` until
+    a worker has accepted -- in particular, they are always `None` on the
+    `POST /requests` create response, and on any request that is still
+    PENDING/MATCHING/ASSIGNED. This patch only adds this backend
+    enrichment; no client reads these fields yet.
     """
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
@@ -78,6 +90,9 @@ class ServiceRequestPublic(BaseModel):
     status: ServiceRequestStatus
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
+    assigned_worker_id: UUID | None = Field(alias="assignedWorkerId", default=None)
+    assigned_worker_name: str | None = Field(alias="assignedWorkerName", default=None)
+    assigned_worker_phone: str | None = Field(alias="assignedWorkerPhone", default=None)
 
 
 class ServiceRequestListResponse(BaseModel):
