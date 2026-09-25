@@ -49,13 +49,14 @@ async function fetchAllPages<T>(pathForPage: (page: number) => string): Promise<
 }
 
 /**
- * One eligible Worker for a specific ServiceRequest, as returned by
- * `GET /associations/me/requests/{requestId}/candidates`
- * (`backend/app/schemas/candidate.py::CandidatePublic`). Admin-local by
- * design — this does not belong in `shared/types`. Deliberately has no
- * "score" field: the backend exposes the three ranking factors directly
- * (`samePincode`, `activeAssignmentCount`, `rating`) instead of an opaque
- * number, and this interface mirrors that exactly.
+ * One eligible Worker for a specific ServiceRequest, as CONSUMED by the
+ * rest of the admin app (`RequestDetailPage.tsx`'s `candidate.rating.toFixed(2)`,
+ * in particular). This is the normalized shape — `rating` is guaranteed
+ * to be an actual JS `number` here. Admin-local by design — this does
+ * not belong in `shared/types`. Deliberately has no "score" field: the
+ * backend exposes the three ranking factors directly (`samePincode`,
+ * `activeAssignmentCount`, `rating`) instead of an opaque number, and
+ * this interface mirrors that exactly.
  */
 export interface Candidate {
   workerId: string;
@@ -68,6 +69,62 @@ export interface Candidate {
   totalJobsCompleted: number;
   activeAssignmentCount: number;
   samePincode: boolean;
+}
+
+/**
+ * The actual over-the-wire shape of one candidate, as
+ * `GET /associations/me/requests/{requestId}/candidates` really sends it
+ * — NOT the same as `Candidate` above. `backend/app/schemas/candidate.py`
+ * declares `rating: Decimal`, and Pydantic v2 (confirmed against the
+ * backend's own installed version) serializes a `Decimal` field to a
+ * JSON **string** (e.g. `"4.80"`), never a JSON number — the same way
+ * `model_dump(mode="json")`/FastAPI's response encoding renders it on
+ * the wire. `totalJobsCompleted`/`activeAssignmentCount` are plain `int`
+ * on the backend, which DO serialize as ordinary JSON numbers, so only
+ * `rating` needs this distinct wire type; every other field already
+ * matches `Candidate` exactly.
+ *
+ * This is what caused the live bug: the previous code fetched pages
+ * typed directly as `Candidate` (claiming `rating: number`) with no
+ * boundary conversion, so `candidate.rating` was actually a `string` at
+ * runtime, and `candidate.rating.toFixed(2)` in `RequestDetailPage.tsx`
+ * threw `TypeError: candidate.rating.toFixed is not a function`.
+ */
+interface CandidateWire {
+  workerId: string;
+  workerCode: string;
+  fullName: string;
+  phoneNumber: string | null;
+  address: string;
+  pincode: string;
+  rating: string;
+  totalJobsCompleted: number;
+  activeAssignmentCount: number;
+  samePincode: boolean;
+}
+
+/**
+ * Normalizes one wire candidate into the `number`-typed `Candidate` the
+ * rest of the app expects — the one, narrow place `rating` is converted.
+ * Falls back to `0` for a malformed/non-numeric value rather than
+ * letting `NaN` propagate into `.toFixed(2)` (which would render "NaN"
+ * but not crash) or throwing, so a single bad row can never blank the
+ * whole candidate list.
+ */
+function toCandidate(wire: CandidateWire): Candidate {
+  const parsedRating = Number(wire.rating);
+  return {
+    workerId: wire.workerId,
+    workerCode: wire.workerCode,
+    fullName: wire.fullName,
+    phoneNumber: wire.phoneNumber,
+    address: wire.address,
+    pincode: wire.pincode,
+    rating: Number.isFinite(parsedRating) ? parsedRating : 0,
+    totalJobsCompleted: wire.totalJobsCompleted,
+    activeAssignmentCount: wire.activeAssignmentCount,
+    samePincode: wire.samePincode,
+  };
 }
 
 /** One entry from the `/services` catalogue — only what's needed to resolve a name. */
@@ -97,9 +154,10 @@ export async function fetchOwnAssociationRequest(requestId: string): Promise<Ser
  * here — the backend order is authoritative.
  */
 export async function fetchCandidates(requestId: string): Promise<Candidate[]> {
-  return fetchAllPages<Candidate>(
+  const wireItems = await fetchAllPages<CandidateWire>(
     (page) => `/associations/me/requests/${requestId}/candidates?page=${page}&page_size=${PAGE_SIZE}`
   );
+  return wireItems.map(toCandidate);
 }
 
 /**
