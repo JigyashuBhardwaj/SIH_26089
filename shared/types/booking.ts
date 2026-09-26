@@ -57,6 +57,20 @@ export interface ServiceRequest {
   createdAt: string;
   /** ISO timestamp of the most recent status/field change. */
   updatedAt: string;
+  /**
+   * Phase 6E-B: the request's currently assigned worker, once one exists.
+   * Matches `backend/app/schemas/request.py`'s `ServiceRequestPublic`
+   * (Phase 6E-A) exactly — all three are `undefined`/`null` until the
+   * backend's current Assignment for this request reaches ACCEPTED or
+   * COMPLETED (never at PENDING/MATCHING/ASSIGNED, and never for a
+   * superseded DECLINED/CANCELLED_BY_WORKER attempt). Optional here
+   * rather than required so this interface still describes the create
+   * (`POST /requests`) response truthfully too, where these are always
+   * absent.
+   */
+  assignedWorkerId?: string | null;
+  assignedWorkerName?: string | null;
+  assignedWorkerPhone?: string | null;
 }
 
 /**

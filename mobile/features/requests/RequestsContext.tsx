@@ -98,6 +98,17 @@ export interface LocalServiceRequest {
   status: ServiceRequestStatus;
   createdAt: string;
   updatedAt: string;
+  // Phase 6E-B: backend-authoritative assigned-worker fields (from
+  // `ServiceRequestPublic`, Phase 6E-A) — `undefined`/`null` until the
+  // backend's current Assignment for this request reaches ACCEPTED or
+  // COMPLETED. Populated only by `loadRequests`'s `GET /requests`
+  // mapping below; `submitRequest`'s `POST /requests` response never has
+  // them set (a brand-new request has no Assignment yet), and neither
+  // `confirmRequest` nor `payRequest` patch them locally — see those
+  // functions' own comments for why.
+  assignedWorkerId?: string | null;
+  assignedWorkerName?: string | null;
+  assignedWorkerPhone?: string | null;
   // UI-only convenience fields — not part of the backend response.
   serviceName: string;
   associationName: string;
@@ -126,6 +137,8 @@ interface RequestsContextValue {
   loadRequests: () => Promise<void>;
   submitRequest: (input: SubmitRequestInput) => Promise<LocalServiceRequest>;
   cancelRequest: (requestId: string) => Promise<void>;
+  confirmRequest: (requestId: string) => Promise<void>;
+  payRequest: (requestId: string) => Promise<void>;
   getRequest: (requestId: string) => LocalServiceRequest | undefined;
 }
 
@@ -213,6 +226,9 @@ export function RequestsProvider({ children }: { children: React.ReactNode }) {
         status: item.status,
         createdAt: item.createdAt,
         updatedAt: item.updatedAt,
+        assignedWorkerId: item.assignedWorkerId,
+        assignedWorkerName: item.assignedWorkerName,
+        assignedWorkerPhone: item.assignedWorkerPhone,
         serviceName: serviceNameById.get(item.serviceId) ?? 'Unknown service',
         associationName: associationNameById.get(item.associationId) ?? 'Unknown association',
         dateTimeLabel: formatRequestedDateTimeLabel(item.requestedDateTime),
@@ -285,14 +301,80 @@ export function RequestsProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
+  /**
+   * Phase 6E-B: the authenticated user confirms that the worker's
+   * completed job is done (`POST /requests/{id}/confirm`). Unlike
+   * `cancelRequest` above, this deliberately does NOT patch `status`
+   * locally from the mutation's own response — that response is
+   * unenriched by design (Phase 6E-B decision: mutation-response
+   * enrichment is out of scope; `GET /requests` remains the one
+   * authoritative, enriched source) and the backend is authoritative for
+   * the resulting status either way, so a full `loadRequests()` re-fetch
+   * is what actually reflects it, with no locally-guessed state in
+   * between. A thrown `ApiError`/`NetworkUnavailableError` (e.g. a 409 —
+   * the request was no longer WORKER_COMPLETED) propagates to the
+   * caller, which reconciles via its own `loadRequests()` call exactly
+   * like the existing cancel flow does.
+   */
+  const confirmRequest = useCallback(
+    async (requestId: string): Promise<void> => {
+      const token = await getAccessToken();
+      await apiRequest<ServiceRequest>(`/requests/${requestId}/confirm`, {
+        method: 'POST',
+        token,
+      });
+      await loadRequests();
+    },
+    [loadRequests]
+  );
+
+  /**
+   * Phase 6E-B: the authenticated user completes the demo payment step
+   * (`POST /requests/{id}/pay`) — no real payment gateway, no card
+   * details collected here or anywhere else in this app. Same
+   * never-locally-patch, always-re-fetch rationale as `confirmRequest`
+   * above.
+   */
+  const payRequest = useCallback(
+    async (requestId: string): Promise<void> => {
+      const token = await getAccessToken();
+      await apiRequest<ServiceRequest>(`/requests/${requestId}/pay`, {
+        method: 'POST',
+        token,
+      });
+      await loadRequests();
+    },
+    [loadRequests]
+  );
+
   const getRequest = useCallback(
     (requestId: string) => requests.find((request) => request.requestId === requestId),
     [requests]
   );
 
   const value = useMemo<RequestsContextValue>(
-    () => ({ requests, loadState, loadError, loadRequests, submitRequest, cancelRequest, getRequest }),
-    [requests, loadState, loadError, loadRequests, submitRequest, cancelRequest, getRequest]
+    () => ({
+      requests,
+      loadState,
+      loadError,
+      loadRequests,
+      submitRequest,
+      cancelRequest,
+      confirmRequest,
+      payRequest,
+      getRequest,
+    }),
+    [
+      requests,
+      loadState,
+      loadError,
+      loadRequests,
+      submitRequest,
+      cancelRequest,
+      confirmRequest,
+      payRequest,
+      getRequest,
+    ]
   );
 
   return <RequestsContext.Provider value={value}>{children}</RequestsContext.Provider>;
