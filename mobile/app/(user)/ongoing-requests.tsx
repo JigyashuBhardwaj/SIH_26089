@@ -20,6 +20,18 @@ import { colors, radius, spacing, typography } from '../../constants/theme';
 const CANCELLABLE_STATUSES: LocalServiceRequest['status'][] = ['PENDING', 'MATCHING', 'ASSIGNED', 'ACCEPTED'];
 
 /**
+ * Phase 6F: the two terminal `ServiceRequestStatus` values — the only two
+ * with an empty transition list in
+ * `shared/booking/bookingStateMachine.ts`, i.e. nothing further can ever
+ * happen to a request once it reaches either one. These now have their
+ * own read-only Booking History screen
+ * (`mobile/app/(user)/booking-history.tsx`, reusing this same
+ * `RequestsContext` data), so this screen stays focused on requests that
+ * still need the user's attention.
+ */
+const TERMINAL_STATUSES: LocalServiceRequest['status'][] = ['COMPLETED', 'CANCELLED_BY_USER'];
+
+/**
  * Phase 6E-B: a visual "tone" for the status badge, independent of the
  * exact label text — keeps the badge styling small and reusable rather
  * than one bespoke style per status.
@@ -87,10 +99,15 @@ function describePayError(err: unknown): string {
 /**
  * Reachable from User Home. Lists the authenticated user's real requests
  * from the backend (Phase 6B-5: `GET /requests`, via
- * `RequestsContext.loadRequests()` — this screen never fetches directly)
- * — both active ones ("Finding a Worker") and cancelled ones, kept
- * visible with a clear cancelled state rather than silently removed, so
- * the person still has a record of what they cancelled.
+ * `RequestsContext.loadRequests()` — this screen never fetches directly).
+ *
+ * Phase 6F: narrowed to non-terminal requests only (`TERMINAL_STATUSES`
+ * above) — a request that reaches `COMPLETED` or `CANCELLED_BY_USER` now
+ * moves to the dedicated Booking History screen
+ * (`mobile/app/(user)/booking-history.tsx`) instead of staying listed
+ * here indefinitely. `RequestsContext.requests` itself is unchanged and
+ * still holds the user's full history; only this screen's own rendering
+ * is narrowed.
  */
 export default function OngoingRequestsScreen() {
   const router = useRouter();
@@ -200,11 +217,15 @@ export default function OngoingRequestsScreen() {
     }
   };
 
+  // Phase 6F: completed/cancelled requests now live on the Booking
+  // History screen — this list only ever renders the non-terminal ones.
+  const activeRequests = requests.filter((request) => !TERMINAL_STATUSES.includes(request.status));
+
   // A pull-to-refresh reload keeps the existing list visible while it
   // runs; only the very first load (nothing to show yet) uses the
   // full-screen loading state below.
-  const isRefreshing = loadState === 'loading' && requests.length > 0;
-  const isInitialLoading = loadState === 'loading' && requests.length === 0;
+  const isRefreshing = loadState === 'loading' && activeRequests.length > 0;
+  const isInitialLoading = loadState === 'loading' && activeRequests.length === 0;
 
   return (
     <View style={styles.screen}>
@@ -244,7 +265,7 @@ export default function OngoingRequestsScreen() {
               <Text style={styles.retryButtonText}>Retry</Text>
             </Pressable>
           </View>
-        ) : requests.length === 0 ? (
+        ) : activeRequests.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="time-outline" size={32} color={colors.textMuted} />
             <Text style={styles.emptyTitle}>No requests yet</Text>
@@ -254,7 +275,7 @@ export default function OngoingRequestsScreen() {
             </Pressable>
           </View>
         ) : (
-          requests.map((request) => (
+          activeRequests.map((request) => (
             <RequestCard
               key={request.requestId}
               request={request}

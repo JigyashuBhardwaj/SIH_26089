@@ -47,7 +47,13 @@ export default function UserHomeScreen() {
           accent="blue"
           onPress={() => router.push('/(user)/ongoing-requests')}
         />
-        <FeatureCard icon="document-text-outline" title="Booking History" onPress={comingSoon.show} />
+        <FeatureCard
+          icon="document-text-outline"
+          title="Booking History"
+          variant="active"
+          accent="blue"
+          onPress={() => router.push('/(user)/booking-history')}
+        />
         <FeatureCard icon="alert-circle-outline" title="Emergency Booking" onPress={comingSoon.show} />
         <FeatureCard icon="people-outline" title="Book for Someone Else" onPress={comingSoon.show} />
         <FeatureCard icon="heart-outline" title="Donate to Charity" onPress={comingSoon.show} />

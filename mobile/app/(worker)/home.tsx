@@ -45,6 +45,13 @@ export default function WorkerHomeScreen() {
           accent="green"
           onPress={() => router.push('/(worker)/accepted-requests')}
         />
+        <FeatureCard
+          icon="document-text-outline"
+          title="Booking History"
+          variant="active"
+          accent="green"
+          onPress={() => router.push('/(worker)/assignment-history')}
+        />
         <FeatureCard icon="calendar-outline" title="Set Availability" onPress={comingSoon.show} />
         <FeatureCard icon="airplane-outline" title="Apply Leave" onPress={comingSoon.show} />
         <FeatureCard icon="headset-outline" title="Contact Support" onPress={comingSoon.show} />
