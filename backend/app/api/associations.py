@@ -40,8 +40,24 @@ Phase 6B-pre adds one more, unrelated, top-level route:
     separate from the `/me/*` sub-resource above: it grants no access to any
     association's private operational data, and does not touch any existing
     route, scope helper, or role guard.
+
+Phase 7C-E adds the two ASSOCIATION_ADMIN leave-decision mutations:
+
+`POST /associations/me/leaves/{leave_id}/approve` — approve a PENDING
+    `WorkerLeave` belonging to a worker in the authenticated admin's own
+    association, re-checking overlap/accepted-assignment conflicts and the
+    60-day annual quota at approval time (state can have changed since the
+    worker submitted it), then transitioning it to APPROVED.
+`POST /associations/me/leaves/{leave_id}/reject`  — reject a PENDING
+    `WorkerLeave` the same way, with no re-checks beyond ownership/status
+    (a rejected leave never affects availability or quota).
+
+Neither route touches `create_assignment`, candidate discovery, or any
+matching logic (Phase 7C-F/7C-G's job), and neither introduces a CANCELLED
+leave status or any worker-initiated cancellation.
 """
 
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -51,12 +67,20 @@ from sqlalchemy.orm import Session
 from app.api.errors import conflict, not_found
 from app.auth.dependencies import get_current_account, require_role
 from app.database import get_db
+from app.domain.leave_rules import (
+    MAX_ANNUAL_LEAVE_DAYS,
+    approved_leave_days_in_year,
+    leave_conflicts_accepted_assignment,
+    leave_overlaps_existing,
+    split_leave_days_by_year,
+)
 from app.models.account import Account
 from app.models.assignment import Assignment
 from app.models.association import Association
 from app.models.enums import AccountRole, AssignmentStatus, ServiceRequestStatus, WorkerStatus
 from app.models.service_request import ServiceRequest
 from app.models.worker import Worker
+from app.models.worker_leave import LeaveStatus, WorkerLeave
 from app.models.worker_skill import WorkerSkill
 from app.schemas.assignment import AssignmentCreate, AssignmentPublic
 from app.schemas.association import AssociationListResponse, AssociationPublic
@@ -64,6 +88,7 @@ from app.schemas.candidate import CandidateListResponse, CandidatePublic
 from app.schemas.pagination import PaginationParams
 from app.schemas.request import ServiceRequestListResponse, ServiceRequestPublic
 from app.schemas.worker import WorkerListResponse, WorkerPublic
+from app.schemas.worker_leave import WorkerLeavePublic
 
 router = APIRouter(prefix="/associations", tags=["associations"])
 
@@ -544,3 +569,178 @@ def list_candidates_for_request(
         page_size=pagination.page_size,
         total=total,
     )
+
+
+def _lock_own_leave_and_worker(
+    db: Session, association_id: UUID, leave_id: UUID
+) -> tuple[WorkerLeave, Worker]:
+    """
+    Lock (`SELECT ... FOR UPDATE`) the `WorkerLeave` row, then its owning
+    `Worker` row, in that fixed order, then verify the worker belongs to
+    the authenticated admin's own association.
+
+    Locking order: the `WorkerLeave` row is locked first -- the directly
+    targeted/mutated resource, before any other state is read, exactly
+    mirroring `create_assignment`'s own "lock before checking anything"
+    first step. The `Worker` row is locked second, only once
+    `leave.worker_id` is known (it cannot be locked first: which worker to
+    lock is itself data that only exists on the leave row). This order is
+    also deadlock-safe for the two concurrent-admin scenarios that matter
+    here: two approvals targeting two DIFFERENT leaves of the SAME worker
+    each lock a different `WorkerLeave` row first, then both serialize on
+    the one shared `Worker` row with no circular wait; two approvals
+    targeting the SAME leave row serialize on the `WorkerLeave` lock
+    itself, before either ever reaches the `Worker` lock.
+
+    The `Worker` lock matters beyond this one row: it is what prevents two
+    concurrent approvals for two *different* PENDING leaves of the same
+    worker from each independently passing their own overlap/quota checks
+    before either commits (each check is a plain, unlocked read -- see
+    `leave_overlaps_existing`/`approved_leave_days_in_year` -- so without
+    this lock, neither transaction would see the other's not-yet-committed
+    result). It does NOT, and cannot, prevent a race against
+    `app/api/assignments.py::accept_assignment` creating a newly-ACCEPTED,
+    conflicting Assignment concurrently with this approval -- that route
+    locks only `Assignment`/`ServiceRequest` rows, never `WorkerLeave` or
+    `Worker`, so no lock taken here can block it. Closing that fully would
+    require `accept_assignment` itself to become leave-aware, which
+    belongs to a later phase (candidate-matching/manual-assignment
+    protection), not this one; re-checking the accepted-assignment
+    conflict here (see `approve_own_leave`) is this phase's best-effort
+    mitigation of that gap, not a complete guarantee against it.
+
+    Raises 404 if the leave doesn't exist or its worker isn't in the
+    authenticated admin's own association -- the two cases are
+    indistinguishable, per this router's existing convention.
+    """
+    leave = db.execute(
+        select(WorkerLeave).where(WorkerLeave.id == leave_id).with_for_update()
+    ).scalar_one_or_none()
+    if leave is None:
+        raise not_found("Leave request not found")
+
+    worker = db.execute(
+        select(Worker).where(Worker.id == leave.worker_id).with_for_update()
+    ).scalar_one_or_none()
+    # The FK (WorkerLeave.worker_id -> workers.id) guarantees `worker` is
+    # never None for a persisted leave row.
+    if worker is None or worker.association_id != association_id:
+        raise not_found("Leave request not found")
+
+    return leave, worker
+
+
+@router.post("/me/leaves/{leave_id}/approve", response_model=WorkerLeavePublic)
+def approve_own_leave(
+    leave_id: UUID,
+    db: Session = Depends(get_db),
+    account: Account = Depends(require_role(AccountRole.ASSOCIATION_ADMIN)),
+) -> WorkerLeavePublic:
+    """
+    Approve a PENDING `WorkerLeave` belonging to a worker in the
+    authenticated admin's own association (Phase 7C-E). Requires the
+    leave to currently be PENDING -- an already-APPROVED or
+    already-REJECTED leave is rejected with 409 regardless of which of
+    the two it currently is (there is no CANCELLED status to transition
+    from or to, and neither terminal status is ever re-enterable).
+
+    Re-checks, in order, AFTER locking (see `_lock_own_leave_and_worker`)
+    and BEFORE writing APPROVED -- the worker's situation can have
+    changed since they submitted this leave:
+
+      1. Overlap with another PENDING/APPROVED leave for the same worker
+         (`leave_overlaps_existing`, excluding this leave itself) -- 409
+         if found. REJECTED leave never blocks, per the locked product
+         rule.
+      2. Conflict with an existing ACCEPTED Assignment
+         (`leave_conflicts_accepted_assignment`) -- 409 if found. This is
+         the same check `POST /workers/me/leaves` already runs at
+         submission time; re-running it here is Phase 7C-E's own locked
+         requirement, since an assignment can be accepted in the gap
+         between submission and approval.
+      3. The 60-day annual quota, in EVERY Asia/Kolkata calendar year this
+         leave touches (`split_leave_days_by_year`) -- for each such year,
+         this worker's current APPROVED total in that year
+         (`approved_leave_days_in_year`, excluding this leave itself)
+         plus this leave's own days in that year must not exceed
+         `MAX_ANNUAL_LEAVE_DAYS`. If ANY affected year would be exceeded,
+         approval fails with 409 and the leave remains PENDING -- nothing
+         is written, since this check runs before any mutation.
+
+    On success: `status` -> APPROVED, `reviewed_by` -> the authenticated
+    admin's own account id, `reviewed_at` -> now. Returns 200 (an
+    existing-resource transition, not a creation -- matching
+    `accept_assignment`/`decline_assignment`/`cancel_assignment`/
+    `complete_assignment`'s identical default-200 convention, not
+    `create_assignment`'s 201).
+    """
+    association_id = _require_own_association_id(account)
+    leave, worker = _lock_own_leave_and_worker(db, association_id, leave_id)
+
+    if leave.status != LeaveStatus.PENDING:
+        raise conflict("Leave request is not awaiting a decision")
+
+    if leave_overlaps_existing(
+        db, worker.id, leave.start_at, leave.end_at, exclude_leave_id=leave.id
+    ):
+        raise conflict("This leave overlaps another pending or approved leave")
+
+    if leave_conflicts_accepted_assignment(db, worker.id, leave.start_at, leave.end_at):
+        raise conflict("This leave conflicts with an existing accepted assignment")
+
+    days_by_year = split_leave_days_by_year(leave.start_at, leave.end_at)
+    for year, days_in_this_leave in days_by_year.items():
+        existing_approved_days = approved_leave_days_in_year(
+            db, worker.id, year, exclude_leave_id=leave.id
+        )
+        if existing_approved_days + days_in_this_leave > MAX_ANNUAL_LEAVE_DAYS:
+            raise conflict(
+                f"Approving this leave would exceed the {MAX_ANNUAL_LEAVE_DAYS}-day "
+                f"annual leave quota for {year}"
+            )
+
+    leave.status = LeaveStatus.APPROVED
+    leave.reviewed_by = account.id
+    leave.reviewed_at = datetime.now(timezone.utc)
+
+    db.flush()
+    db.refresh(leave)
+
+    return WorkerLeavePublic.model_validate(leave)
+
+
+@router.post("/me/leaves/{leave_id}/reject", response_model=WorkerLeavePublic)
+def reject_own_leave(
+    leave_id: UUID,
+    db: Session = Depends(get_db),
+    account: Account = Depends(require_role(AccountRole.ASSOCIATION_ADMIN)),
+) -> WorkerLeavePublic:
+    """
+    Reject a PENDING `WorkerLeave` belonging to a worker in the
+    authenticated admin's own association (Phase 7C-E). Requires the
+    leave to currently be PENDING, identically to `approve_own_leave`
+    above -- 409 otherwise.
+
+    No overlap/assignment/quota re-check is needed: a REJECTED leave
+    never blocks other leave, never affects availability, and never
+    consumes quota, per the locked product rules -- it has no further
+    side effect to validate.
+
+    On success: `status` -> REJECTED, `reviewed_by` -> the authenticated
+    admin's own account id, `reviewed_at` -> now. Returns 200, same
+    reasoning as `approve_own_leave`.
+    """
+    association_id = _require_own_association_id(account)
+    leave, _worker = _lock_own_leave_and_worker(db, association_id, leave_id)
+
+    if leave.status != LeaveStatus.PENDING:
+        raise conflict("Leave request is not awaiting a decision")
+
+    leave.status = LeaveStatus.REJECTED
+    leave.reviewed_by = account.id
+    leave.reviewed_at = datetime.now(timezone.utc)
+
+    db.flush()
+    db.refresh(leave)
+
+    return WorkerLeavePublic.model_validate(leave)
