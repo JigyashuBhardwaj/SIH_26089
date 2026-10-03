@@ -11,6 +11,11 @@ constraints) for the nine core entities locked for Phase 5C:
 
 Federation, Association, Account, UserProfile, Worker, Service,
 WorkerSkill, ServiceRequest, Assignment.
+
+Phase 7C-B adds a tenth: WorkerLeave (plus its LeaveStatus enum) — the
+structural database foundation for worker leave. See
+`app.models.worker_leave` for what this phase does and deliberately does
+not implement yet.
 """
 
 from app.models.account import Account
@@ -22,6 +27,7 @@ from app.models.service import Service
 from app.models.service_request import ServiceRequest
 from app.models.user_profile import UserProfile
 from app.models.worker import Worker
+from app.models.worker_leave import LeaveStatus, WorkerLeave
 from app.models.worker_skill import WorkerSkill
 
 __all__ = [
@@ -31,11 +37,13 @@ __all__ = [
     "AssignmentStatus",
     "Association",
     "Federation",
+    "LeaveStatus",
     "Service",
     "ServiceRequest",
     "ServiceRequestStatus",
     "UserProfile",
     "Worker",
+    "WorkerLeave",
     "WorkerSkill",
     "WorkerStatus",
 ]

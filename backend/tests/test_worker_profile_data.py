@@ -231,16 +231,27 @@ def test_alembic_migration_upgrade_and_downgrade_round_trip():
 
     from alembic import command
 
+    # This test targets the Phase 5E-G migration specifically, so it is
+    # pinned to that migration's own revision id (`0e07ae0cfcff`) rather
+    # than the relative "head" -- otherwise, as soon as any later phase
+    # adds a further migration on top (e.g. Phase 7C-B's `WorkerLeave`
+    # migration), "head" would shift to that newer revision and
+    # "downgrade -1" would undo the newer migration instead of the
+    # Phase 5E-G columns this test actually asserts on. Stamping to the
+    # explicit revision id makes this test invariant to how many
+    # migrations exist above Phase 5E-G.
+    #
     # The test database's schema was created directly from the SQLAlchemy
     # models (`Base.metadata.create_all`, see conftest.py's `_test_schema`
     # fixture) rather than by actually running Alembic migrations, so it
     # has no `alembic_version` row yet. That schema already matches the
     # migration head's end state (models and the head migration are kept
     # in sync -- confirmed separately via `alembic check`), so it is safe
-    # to `stamp` it to head: this only records "the DB is already at this
-    # revision" without running any SQL, after which `downgrade`/`upgrade`
-    # exercise this migration's real DDL against the real tables.
-    command.stamp(backend_dir_config, "head")
+    # to `stamp` it to this revision: this only records "the DB is already
+    # at this revision" without running any SQL, after which
+    # `downgrade`/`upgrade` exercise this migration's real DDL against the
+    # real tables.
+    command.stamp(backend_dir_config, "0e07ae0cfcff")
 
     # Downgrade one step (removing the Phase 5E-G columns), confirming a
     # clean downgrade, then re-upgrade, confirming a clean upgrade.

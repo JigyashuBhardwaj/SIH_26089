@@ -121,3 +121,10 @@ class Worker(TimestampMixin, Base):
     assignments: Mapped[list["Assignment"]] = relationship(  # noqa: F821
         back_populates="worker", passive_deletes=True
     )
+    # Phase 7C-B: WorkerLeave.worker_id is ON DELETE CASCADE (see that
+    # model's own docstring for why this differs from Assignment's
+    # RESTRICT) -- passive_deletes=True so PostgreSQL enforces the
+    # cascade itself, same convention as `skills` above.
+    leaves: Mapped[list["WorkerLeave"]] = relationship(  # noqa: F821
+        back_populates="worker", passive_deletes=True
+    )
