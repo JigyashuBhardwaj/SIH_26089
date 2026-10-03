@@ -4,8 +4,10 @@ Tests for the Phase 5E-C `ServiceRequest` routes:
 """
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
+import pytest
 from sqlalchemy import update as sa_update
 
 from app.models.enums import AccountRole, ServiceRequestStatus
@@ -13,6 +15,27 @@ from app.models.service_request import ServiceRequest
 
 VALID_LEAD = timedelta(hours=5)
 TOO_SOON_LEAD = timedelta(hours=1)
+
+KOLKATA_TZ = ZoneInfo("Asia/Kolkata")
+
+
+def _at_ist_days_ahead(days_ahead: int, hour: int = 12) -> datetime:
+    """
+    A timezone-aware UTC datetime whose Asia/Kolkata calendar date is
+    exactly `days_ahead` Asia/Kolkata calendar days after today's
+    Asia/Kolkata calendar date, at `hour` IST. Used for the Phase 7C-C
+    maximum-booking-horizon boundary tests below, where the variable
+    under test is the Asia/Kolkata calendar-day difference, not elapsed
+    time -- picking a daytime IST hour on the target date keeps the
+    4-hour minimum-lead-time rule trivially satisfied regardless of the
+    real time this test happens to run at (the smallest possible gap,
+    just past midnight IST on `days_ahead`, is still many hours away for
+    any `days_ahead >= 1`).
+    """
+    today_ist = datetime.now(KOLKATA_TZ).date()
+    target_date = today_ist + timedelta(days=days_ahead)
+    target_ist = datetime.combine(target_date, time(hour=hour), tzinfo=KOLKATA_TZ)
+    return target_ist.astimezone(timezone.utc)
 
 
 def _valid_payload(*, service_id, association_id, lead=VALID_LEAD) -> dict:
@@ -319,6 +342,141 @@ def test_create_with_naive_datetime_rejected(
     payload = _valid_payload(service_id=service.id, association_id=association.id)
     naive = (datetime.now() + VALID_LEAD).replace(tzinfo=None)
     payload["requestedDateTime"] = naive.isoformat()  # no offset/'Z'
+
+    response = client.post("/requests", headers=auth_header(account), json=payload)
+
+    assert response.status_code == 422
+
+
+# --- Maximum booking horizon (Phase 7C-C) -----------------------------------
+
+
+def test_create_exactly_2_calendar_days_ahead_ist_accepted(
+    client, make_account, make_user_profile, make_federation, make_association,
+    make_service, auth_header,
+):
+    """Locked product rule: 2 Asia/Kolkata calendar days ahead is the last valid day."""
+    account, _ = _make_user(make_account, make_user_profile)
+    federation = make_federation()
+    association = make_association(federation_id=federation.id)
+    service = make_service()
+
+    payload = _valid_payload(service_id=service.id, association_id=association.id)
+    payload["requestedDateTime"] = _at_ist_days_ahead(2).isoformat()
+
+    response = client.post("/requests", headers=auth_header(account), json=payload)
+
+    assert response.status_code == 201
+
+
+def test_create_beyond_2_calendar_days_ahead_ist_rejected(
+    client, make_account, make_user_profile, make_federation, make_association,
+    make_service, auth_header,
+):
+    """Locked product rule: 3+ Asia/Kolkata calendar days ahead is rejected."""
+    account, _ = _make_user(make_account, make_user_profile)
+    federation = make_federation()
+    association = make_association(federation_id=federation.id)
+    service = make_service()
+
+    payload = _valid_payload(service_id=service.id, association_id=association.id)
+    payload["requestedDateTime"] = _at_ist_days_ahead(3).isoformat()
+
+    response = client.post("/requests", headers=auth_header(account), json=payload)
+
+    assert response.status_code == 422
+
+
+def test_create_tomorrow_ist_accepted(
+    client, make_account, make_user_profile, make_federation, make_association,
+    make_service, auth_header,
+):
+    """Locked product rule's own worked example: tomorrow (IST) is valid."""
+    account, _ = _make_user(make_account, make_user_profile)
+    federation = make_federation()
+    association = make_association(federation_id=federation.id)
+    service = make_service()
+
+    payload = _valid_payload(service_id=service.id, association_id=association.id)
+    # Tomorrow at noon IST is always >= 4 hours from "now", regardless of
+    # what time this test happens to run.
+    payload["requestedDateTime"] = _at_ist_days_ahead(1).isoformat()
+
+    response = client.post("/requests", headers=auth_header(account), json=payload)
+
+    assert response.status_code == 201
+
+
+def test_create_today_ist_accepted_when_minimum_lead_time_also_satisfied(
+    client, make_account, make_user_profile, make_federation, make_association,
+    make_service, auth_header,
+):
+    """
+    Locked product rule's own worked example: "today -> today: valid if
+    existing minimum lead-time rules permit it." This constructs
+    "now (IST) + 5 hours" -- comfortably past the unrelated 4-hour
+    minimum-lead-time rule -- and only proceeds with the "today" assertion
+    when that target is still the same Asia/Kolkata calendar day as now
+    (it will be, unless the test happens to run within the last 5 hours of
+    the IST day, in which case the premise of this specific example no
+    longer applies and the test is skipped rather than asserting something
+    the locked rule never claimed).
+    """
+    now_ist = datetime.now(KOLKATA_TZ)
+    target_ist = now_ist + timedelta(hours=5)
+    if target_ist.date() != now_ist.date():
+        pytest.skip(
+            "This run is within 5 hours of IST midnight, so 'now + 5h' is "
+            "already tomorrow -- the 'today is valid' example doesn't apply "
+            "right now; test_create_tomorrow_ist_accepted above already "
+            "covers the tomorrow case unconditionally."
+        )
+
+    account, _ = _make_user(make_account, make_user_profile)
+    federation = make_federation()
+    association = make_association(federation_id=federation.id)
+    service = make_service()
+
+    payload = _valid_payload(service_id=service.id, association_id=association.id)
+    payload["requestedDateTime"] = target_ist.astimezone(timezone.utc).isoformat()
+
+    response = client.post("/requests", headers=auth_header(account), json=payload)
+
+    assert response.status_code == 201
+
+
+def test_create_requested_time_ist_calendar_date_beyond_horizon_despite_utc_date_within_it(
+    client, make_account, make_user_profile, make_federation, make_association,
+    make_service, auth_header,
+):
+    """
+    Phase 7C-C's locked calendar-day reference timezone is Asia/Kolkata,
+    not UTC. This constructs a timestamp whose UTC calendar date is only
+    2 days ahead (would pass under a UTC-based rule) but whose Asia/Kolkata
+    calendar date is 3 days ahead (IST = UTC+5:30, so a UTC evening
+    timestamp on day+2 falls after midnight IST, into day+3) -- it must be
+    rejected, proving the rule uses IST, not the server's own UTC clock.
+    """
+    account, _ = _make_user(make_account, make_user_profile)
+    federation = make_federation()
+    association = make_association(federation_id=federation.id)
+    service = make_service()
+
+    today_ist = datetime.now(KOLKATA_TZ).date()
+    # 19:00 UTC on (today_ist + 2) is 00:30 IST on (today_ist + 3) --
+    # UTC calendar date is day+2, IST calendar date is day+3.
+    utc_date = today_ist + timedelta(days=2)
+    requested = datetime(
+        utc_date.year, utc_date.month, utc_date.day, 19, 0, tzinfo=timezone.utc
+    )
+    # Sanity check this construction actually crosses the IST day boundary
+    # the way this test's docstring claims -- if the local tz database
+    # ever makes this assumption false, fail loudly here instead of
+    # silently asserting the wrong thing below.
+    assert requested.astimezone(KOLKATA_TZ).date() == today_ist + timedelta(days=3)
+
+    payload = _valid_payload(service_id=service.id, association_id=association.id)
+    payload["requestedDateTime"] = requested.isoformat()
 
     response = client.post("/requests", headers=auth_header(account), json=payload)
 

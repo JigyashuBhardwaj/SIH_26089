@@ -83,11 +83,13 @@ from app.models import (  # noqa: E402
     AssignmentStatus,
     Association,
     Federation,
+    LeaveStatus,
     Service,
     ServiceRequest,
     ServiceRequestStatus,
     UserProfile,
     Worker,
+    WorkerLeave,
     WorkerSkill,
     WorkerStatus,
 )
@@ -375,6 +377,35 @@ def make_assignment(db_session):
         return assignment
 
     return _make_assignment
+
+
+@pytest.fixture()
+def make_worker_leave(db_session):
+    """Factory fixture: create a temporary `WorkerLeave` row for this test (Phase 7C-C)."""
+
+    def _make_worker_leave(
+        *,
+        worker_id,
+        start_at: datetime,
+        end_at: datetime,
+        status: LeaveStatus = LeaveStatus.PENDING,
+        reviewed_by=None,
+        reviewed_at: datetime | None = None,
+    ) -> WorkerLeave:
+        leave = WorkerLeave(
+            worker_id=worker_id,
+            start_at=start_at,
+            end_at=end_at,
+            status=status,
+            reviewed_by=reviewed_by,
+            reviewed_at=reviewed_at,
+        )
+        db_session.add(leave)
+        db_session.flush()
+        db_session.refresh(leave)
+        return leave
+
+    return _make_worker_leave
 
 
 @pytest.fixture()

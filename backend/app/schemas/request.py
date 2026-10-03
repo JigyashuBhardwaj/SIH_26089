@@ -13,11 +13,25 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.domain.leave_rules import to_kolkata_date
 from app.models.enums import ServiceRequestStatus
 
 # Locked product requirement: a requested service time must be at least
 # this far in the future, relative to server time at creation.
 MINIMUM_LEAD_TIME = timedelta(hours=4)
+
+# Phase 7C-C locked product requirement: a requested service time must be
+# at most this many Asia/Kolkata calendar days ahead of the Asia/Kolkata
+# calendar date at creation time -- e.g. if "today" in IST is 3 Oct, 3, 4,
+# and 5 Oct are all valid (a difference of 0, 1, or 2 calendar days), but
+# 6 Oct onward is rejected. This is deliberately calendar-day arithmetic
+# (via `to_kolkata_date`, the single shared definition of "calendar day"
+# this codebase uses -- see `app.domain.leave_rules`), NOT an elapsed-time
+# check like `MINIMUM_LEAD_TIME` above: two timestamps less than 48 hours
+# apart can fall on calendar dates 3 days apart in Asia/Kolkata terms (and
+# vice versa), so this check is independent of, and in addition to, the
+# minimum-lead-time check -- both must pass.
+MAX_BOOKING_HORIZON_DAYS = 2
 
 
 class ServiceRequestCreate(BaseModel):
@@ -41,9 +55,11 @@ class ServiceRequestCreate(BaseModel):
     def _validate_requested_date_time(cls, value: datetime) -> datetime:
         """
         Reject a naive datetime outright (rather than silently guessing a
-        timezone, which would create ambiguity), and reject any
+        timezone, which would create ambiguity), reject any
         timezone-aware datetime less than `MINIMUM_LEAD_TIME` from the
-        current server time.
+        current server time, and (Phase 7C-C) reject one more than
+        `MAX_BOOKING_HORIZON_DAYS` Asia/Kolkata calendar days ahead of
+        today's Asia/Kolkata calendar date.
         """
         if value.tzinfo is None:
             raise ValueError(
@@ -55,6 +71,14 @@ class ServiceRequestCreate(BaseModel):
         if value < now + MINIMUM_LEAD_TIME:
             raise ValueError(
                 "requestedDateTime must be at least 4 hours from the current time"
+            )
+
+        booking_date = to_kolkata_date(now)
+        requested_date = to_kolkata_date(value)
+        if (requested_date - booking_date).days > MAX_BOOKING_HORIZON_DAYS:
+            raise ValueError(
+                "requestedDateTime must be at most "
+                f"{MAX_BOOKING_HORIZON_DAYS} calendar days ahead (Asia/Kolkata)"
             )
 
         return value
