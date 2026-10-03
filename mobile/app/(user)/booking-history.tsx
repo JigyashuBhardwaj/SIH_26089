@@ -82,7 +82,7 @@ export default function BookingHistoryScreen() {
             <Ionicons name="cloud-offline-outline" size={28} color={colors.textMuted} />
             <Text style={styles.emptyTitle}>Couldn&apos;t load history</Text>
             <Text style={styles.emptyBody}>{loadError}</Text>
-            <Pressable style={styles.retryButton} onPress={loadRequests}>
+            <Pressable style={styles.retryButton} onPress={() => loadRequests()}>
               <Text style={styles.retryButtonText}>Retry</Text>
             </Pressable>
           </View>

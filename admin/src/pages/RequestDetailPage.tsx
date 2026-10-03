@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { ServiceRequest } from '@shared/types/booking';
 import { DashboardLayout } from '../components/DashboardLayout';
@@ -21,6 +21,9 @@ type LoadState = 'loading' | 'error' | 'ready';
 type CandidateState = 'idle' | 'loading' | 'error' | 'ready';
 
 const FINDABLE_STATUSES = new Set(['PENDING', 'MATCHING']);
+
+/** Phase 6G: how often this page silently re-fetches the request in the background. */
+const POLL_INTERVAL_MS = 5000;
 
 function formatRequestedDateTime(iso: string): string {
   const parsed = new Date(iso);
@@ -78,6 +81,57 @@ export function RequestDetailPage() {
       loadRequest();
     }
   }, [account, loadRequest]);
+
+  // Phase 6G: background-refresh this request while the admin is viewing
+  // it, so a worker accepting/declining/cancelling/completing it
+  // elsewhere shows up here without the admin having to navigate away and
+  // back (the only thing that currently re-fetches, since React Router
+  // happens to remount this page on route change). Calls only
+  // `fetchOwnAssociationRequest` — the service catalogue rarely changes
+  // and re-fetching it every tick would be wasted work, so each poll tick
+  // writes straight to `serviceRequest` without touching `serviceNames`,
+  // `loadState`, or `loadError`; `loadRequest` above (mount + after
+  // `handleAssign`) remains the only place that fetches the service
+  // catalogue. A poll tick never flips this page into its "Loading
+  // request…" state and a poll failure never replaces it with the full
+  // error card — the next scheduled tick (or the admin's own Retry/
+  // mutation) simply tries again. Mount-scoped: stops entirely on
+  // unmount (the admin navigates away). A tick is skipped — never
+  // queued — while a previous tick is still in flight, while the admin's
+  // own `handleAssign` mutation is running, or while the
+  // initial/own-mutation `loadRequest` call above is already loading, so
+  // polling can never overlap itself or race an explicit mutation.
+  const assigningWorkerIdRef = useRef(assigningWorkerId);
+  assigningWorkerIdRef.current = assigningWorkerId;
+  const loadStateRef = useRef(loadState);
+  loadStateRef.current = loadState;
+
+  useEffect(() => {
+    if (account?.role !== 'ASSOCIATION_ADMIN' || !requestId) {
+      return;
+    }
+
+    let isTickInFlight = false;
+
+    const intervalId = window.setInterval(() => {
+      if (isTickInFlight || assigningWorkerIdRef.current !== null || loadStateRef.current === 'loading') {
+        return;
+      }
+      isTickInFlight = true;
+      fetchOwnAssociationRequest(requestId)
+        .then((req) => {
+          setServiceRequest(req);
+        })
+        .catch(() => {
+          // Silent by design — see this effect's doc comment above.
+        })
+        .finally(() => {
+          isTickInFlight = false;
+        });
+    }, POLL_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [account, requestId]);
 
   const handleFindCandidates = useCallback(async () => {
     if (!requestId) return;

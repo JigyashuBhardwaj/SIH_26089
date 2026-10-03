@@ -1,12 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { BottomNavBar } from '../../components/BottomNavBar';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { useAuth } from '../../features/auth';
 import { useRequests, type LocalServiceRequest } from '../../features/requests';
+import { usePollingRefresh } from '../../hooks/usePollingRefresh';
 import { ApiError, NetworkUnavailableError } from '../../services/apiClient';
 import { colors, radius, spacing, typography } from '../../constants/theme';
 
@@ -130,6 +131,19 @@ export default function OngoingRequestsScreen() {
   useEffect(() => {
     loadRequests();
   }, [loadRequests]);
+
+  // Phase 6G: background-refresh this screen while it's focused, so an
+  // admin assigning a worker, a worker accepting/declining/cancelling/
+  // completing, etc. shows up here without the user having to manually
+  // pull-to-refresh. `{ silent: true }` reuses the exact same
+  // `RequestsContext.loadRequests` fetch, just without its visible
+  // 'loading' flip (no pull-to-refresh spinner popping up on its own) and
+  // without surfacing a failure as this screen's full error state — see
+  // `usePollingRefresh`'s own doc comment for the focus/overlap/pause
+  // guarantees. Paused during this screen's own cancel/confirm/pay
+  // mutation (`actioningId`) so a poll tick can never race it.
+  const pollRequests = useCallback(() => loadRequests({ silent: true }), [loadRequests]);
+  usePollingRefresh({ onPoll: pollRequests, isPaused: actioningId !== null });
 
   const handleLogout = () => {
     logout();
@@ -261,7 +275,7 @@ export default function OngoingRequestsScreen() {
             <Ionicons name="cloud-offline-outline" size={28} color={colors.textMuted} />
             <Text style={styles.emptyTitle}>Couldn&apos;t load requests</Text>
             <Text style={styles.emptyBody}>{loadError}</Text>
-            <Pressable style={styles.retryButton} onPress={loadRequests}>
+            <Pressable style={styles.retryButton} onPress={() => loadRequests()}>
               <Text style={styles.retryButtonText}>Retry</Text>
             </Pressable>
           </View>

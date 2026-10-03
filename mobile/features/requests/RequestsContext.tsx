@@ -134,7 +134,7 @@ interface RequestsContextValue {
   requests: LocalServiceRequest[];
   loadState: RequestsLoadState;
   loadError: string | null;
-  loadRequests: () => Promise<void>;
+  loadRequests: (options?: { silent?: boolean }) => Promise<void>;
   submitRequest: (input: SubmitRequestInput) => Promise<LocalServiceRequest>;
   cancelRequest: (requestId: string) => Promise<void>;
   confirmRequest: (requestId: string) => Promise<void>;
@@ -174,15 +174,28 @@ const RequestsContext = createContext<RequestsContextValue | undefined>(undefine
  * with the backend on a 409 (the request turned out not to be
  * cancellable anymore) is the caller's responsibility via the existing
  * `loadRequests()`, not something this function does itself.
+ *
+ * Phase 6G: `loadRequests` takes an optional `{ silent: true }` so
+ * `mobile/hooks/usePollingRefresh.ts` can reuse this exact same
+ * fetch-every-page implementation for background polling — never a
+ * second, duplicated fetch path. Silent mode skips the `loadState`/
+ * `loadError` side effects entirely (no 'loading' flip, so no visible
+ * pull-to-refresh spinner, and a failure is swallowed rather than
+ * surfaced) while still replacing `requests` wholesale on success, same
+ * as a normal call. The default (no options — every existing call site:
+ * initial mount, pull-to-refresh, mutation reconciliation) is unchanged.
  */
 export function RequestsProvider({ children }: { children: React.ReactNode }) {
   const [requests, setRequests] = useState<LocalServiceRequest[]>([]);
   const [loadState, setLoadState] = useState<RequestsLoadState>('idle');
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const loadRequests = useCallback(async (): Promise<void> => {
-    setLoadState('loading');
-    setLoadError(null);
+  const loadRequests = useCallback(async (options?: { silent?: boolean }): Promise<void> => {
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setLoadState('loading');
+      setLoadError(null);
+    }
 
     try {
       // 1. Fetch every page of GET /requests, driven by the
@@ -236,12 +249,26 @@ export function RequestsProvider({ children }: { children: React.ReactNode }) {
 
       // 3. GET /requests is authoritative for the complete list —
       // replace wholesale rather than merging, so nothing local/stale
-      // survives a successful load.
+      // survives a successful load. A silent (background poll) call only
+      // ever runs once `loadState` is already 'ready' (the screens that
+      // poll only start doing so once their own initial, non-silent load
+      // has succeeded), so re-setting it here would be a redundant,
+      // same-value state transition — skipped entirely so a silent
+      // success path touches no load-state at all, exactly like a silent
+      // failure already doesn't.
       setRequests(normalized);
-      setLoadState('ready');
+      if (!silent) {
+        setLoadState('ready');
+      }
     } catch (err) {
-      setLoadError(describeLoadRequestsError(err));
-      setLoadState('error');
+      // Phase 6G: a silent (background poll) failure must never replace
+      // this screen with its full error state — leave `requests`/
+      // `loadState` exactly as they were and let the next poll tick (or
+      // the user's own pull-to-refresh) try again.
+      if (!silent) {
+        setLoadError(describeLoadRequestsError(err));
+        setLoadState('error');
+      }
     }
   }, []);
 

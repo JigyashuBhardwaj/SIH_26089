@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import type { Assignment } from '@shared/types';
+import { usePollingRefresh } from '../../hooks/usePollingRefresh';
 import { ApiError } from '../../services/apiClient';
 import {
   acceptAssignment,
@@ -85,6 +86,22 @@ export default function BookingRequestsScreen() {
   useEffect(() => {
     loadAssignments();
   }, [loadAssignments]);
+
+  // Phase 6G: background-refresh this screen while it's focused, so an
+  // offer accepted/declined elsewhere (or by the worker on another
+  // device) stops showing here without a manual pull-to-refresh. Calls
+  // the already-imported `fetchOwnAssignments()` directly — the exact
+  // same fetch `loadAssignments` makes — but writes straight to
+  // `assignments` without touching `loadState`/`loadError`, so a poll
+  // tick never flips this screen's RefreshControl spinner on by itself
+  // and a poll failure never replaces this screen with its full error
+  // state. Paused during this screen's own accept/decline mutation
+  // (`actioningId`) so a poll tick can never race it.
+  const pollAssignments = useCallback(async () => {
+    const all = await fetchOwnAssignments();
+    setAssignments(all);
+  }, []);
+  usePollingRefresh({ onPoll: pollAssignments, isPaused: actioningId !== null });
 
   // Booking Requests = offers still awaiting the worker's response. The
   // backend's own history endpoint returns every assignment ever made to

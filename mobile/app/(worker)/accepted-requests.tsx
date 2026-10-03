@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import type { Assignment } from '@shared/types';
+import { usePollingRefresh } from '../../hooks/usePollingRefresh';
 import { ApiError } from '../../services/apiClient';
 import {
   cancelAssignment,
@@ -95,6 +96,21 @@ export default function AcceptedRequestsScreen() {
   useEffect(() => {
     loadAssignments();
   }, [loadAssignments]);
+
+  // Phase 6G: background-refresh this screen while it's focused, so a job
+  // cancelled/completed/reassigned elsewhere stops showing here without a
+  // manual pull-to-refresh. Same silent-poll convention as
+  // `requests.tsx`: calls the already-imported `fetchOwnAssignments()`
+  // directly and writes straight to `assignments`, without touching
+  // `loadState`/`loadError` (no spinner popping up on its own, no poll
+  // failure replacing this screen with its full error state). Paused
+  // during this screen's own cancel/complete mutation (`actioningId`) so
+  // a poll tick can never race it.
+  const pollAssignments = useCallback(async () => {
+    const all = await fetchOwnAssignments();
+    setAssignments(all);
+  }, []);
+  usePollingRefresh({ onPoll: pollAssignments, isPaused: actioningId !== null });
 
   // Accepted Requests = assignments the worker has already accepted. Same
   // full-history fetch as `requests.tsx`, narrowed client-side — the
