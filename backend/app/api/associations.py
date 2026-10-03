@@ -391,8 +391,21 @@ def list_candidates_for_request(
       1. same pincode as the request first
       2. fewer active (PENDING_RESPONSE/ACCEPTED) assignments first
       3. higher rating first
-      4. Worker.id ascending, as the final deterministic tiebreaker
-    `total_jobs_completed` and `worker_code` are never ranking factors.
+      4. Phase 7B: higher total_jobs_completed first (this is the
+         EXISTING, static `Worker.total_jobs_completed` column — nothing
+         in this phase makes it a live counter; it is read exactly as it
+         already sits in the database)
+      5. Worker.id ascending, as the final deterministic tiebreaker
+    `worker_code` is never a ranking factor.
+
+    Phase 7B also adds one informational-only field, `previouslyDeclined`
+    — true iff this Worker has a DECLINED Assignment on THIS exact
+    ServiceRequest (never on a different request, and never for any other
+    terminal Assignment status). It is computed purely as an additional
+    SELECT-list column, exactly like `active_assignment_count`/
+    `same_pincode` below — it never appears in `eligibility_filters` and
+    never appears in `order_by`, so it can neither exclude a worker nor
+    change their rank.
 
     Only a request currently PENDING or MATCHING can be searched for
     candidates; any other status (it already has an active assignment, or
@@ -443,6 +456,25 @@ def list_candidates_for_request(
         .exists()
     )
 
+    # Phase 7B: informational-only "previously declined this exact
+    # request" flag. Deliberately scoped to `Assignment.request_id ==
+    # service_request.id` (THIS request only — never a different one the
+    # worker may have declined) and to `status == DECLINED` specifically
+    # (never CANCELLED_BY_WORKER or COMPLETED, which are different
+    # outcomes). This is a SELECT-list column only — it is never added to
+    # `eligibility_filters` and never added to `order_by`, so it cannot
+    # exclude a worker or change their rank.
+    previously_declined_exists = (
+        select(Assignment.id)
+        .where(
+            Assignment.worker_id == Worker.id,
+            Assignment.request_id == service_request.id,
+            Assignment.status == AssignmentStatus.DECLINED,
+        )
+        .correlate(Worker)
+        .exists()
+    )
+
     # Total count of ALL of this worker's currently active assignments
     # (not limited to the same datetime) — this is the "workload" ranking
     # factor, distinct from the availability conflict check above.
@@ -472,12 +504,17 @@ def list_candidates_for_request(
     ).scalar_one()
 
     rows = db.execute(
-        select(Worker, active_assignment_count.label("active_assignment_count"))
+        select(
+            Worker,
+            active_assignment_count.label("active_assignment_count"),
+            previously_declined_exists.label("previously_declined"),
+        )
         .where(*eligibility_filters)
         .order_by(
             case((is_same_pincode, 0), else_=1).asc(),
             active_assignment_count.asc(),
             Worker.rating.desc(),
+            Worker.total_jobs_completed.desc(),
             Worker.id.asc(),
         )
         .offset(pagination.offset)
@@ -496,8 +533,9 @@ def list_candidates_for_request(
             total_jobs_completed=worker.total_jobs_completed,
             active_assignment_count=active_count,
             same_pincode=(worker.pincode == service_request.pincode),
+            previously_declined=previously_declined,
         )
-        for worker, active_count in rows
+        for worker, active_count, previously_declined in rows
     ]
 
     return CandidateListResponse(

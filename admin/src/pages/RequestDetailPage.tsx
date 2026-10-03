@@ -292,7 +292,12 @@ export function RequestDetailPage() {
                           <tr key={candidate.workerId} className={styles.row}>
                             <td>
                               <div className={styles.workerCell}>
-                                <span className={styles.workerName}>{candidate.fullName}</span>
+                                <span className={styles.workerName}>
+                                  {candidate.fullName}
+                                  {candidate.previouslyDeclined ? (
+                                    <span className={styles.previouslyDeclinedBadge}>Previously declined</span>
+                                  ) : null}
+                                </span>
                                 <span className={styles.workerCode}>{candidate.workerCode}</span>
                               </div>
                             </td>

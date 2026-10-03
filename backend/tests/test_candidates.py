@@ -722,39 +722,38 @@ def test_worker_id_is_deterministic_final_tiebreaker(
     assert ids == [str(expected_first), str(expected_second)]
 
 
-def test_total_jobs_completed_does_not_affect_ranking(
+def test_higher_total_jobs_completed_ranks_first_when_previous_factors_tie(
     client, make_account, make_user_profile, make_federation, make_association,
     make_service, make_service_request, make_worker, make_worker_skill, auth_header,
 ):
     """
+    Phase 7B: `total_jobs_completed` is now the fourth ranking tier.
     Same pincode, same active-assignment count (0), same rating -- only
-    `total_jobs_completed` differs. Ordering must fall through to the
-    Worker.id tiebreaker exactly as the "no other factors" case would,
-    proving `total_jobs_completed` played no role.
+    `total_jobs_completed` differs, so the worker with MORE completed
+    jobs must rank first (this supersedes the pre-7B
+    `test_total_jobs_completed_does_not_affect_ranking`, whose premise
+    this phase deliberately changes).
     """
     _, association, service, service_request, admin = _setup_request(
         make_federation, make_association, make_account, make_user_profile,
         make_service, make_service_request, pincode="560001",
     )
-    _, worker_many_jobs = _make_eligible_worker(
+    _make_eligible_worker(
         make_account, make_worker, make_worker_skill,
         association_id=association.id, service_id=service.id,
         full_name="Many Jobs", pincode="560001", rating=Decimal("4.00"),
         total_jobs_completed=500,
     )
-    _, worker_few_jobs = _make_eligible_worker(
+    _make_eligible_worker(
         make_account, make_worker, make_worker_skill,
         association_id=association.id, service_id=service.id,
         full_name="Few Jobs", pincode="560001", rating=Decimal("4.00"),
         total_jobs_completed=0,
     )
-    expected_first, expected_second = sorted(
-        [worker_many_jobs.id, worker_few_jobs.id], key=str
-    )
 
     response = client.get(_url(service_request.id), headers=auth_header(admin))
-    ids = [item["workerId"] for item in response.json()["items"]]
-    assert ids == [str(expected_first), str(expected_second)]
+    names = [item["fullName"] for item in response.json()["items"]]
+    assert names.index("Many Jobs") < names.index("Few Jobs")
 
 
 # ============================================================= RESPONSE ===
@@ -791,10 +790,12 @@ def test_response_uses_camel_case_and_all_required_fields(
         "totalJobsCompleted",
         "activeAssignmentCount",
         "samePincode",
+        "previouslyDeclined",
     }
     assert item["samePincode"] is True
     assert item["activeAssignmentCount"] == 0
     assert item["totalJobsCompleted"] == 9
+    assert item["previouslyDeclined"] is False
 
 
 def test_no_password_hash_or_auth_secrets_exposed(
@@ -865,6 +866,200 @@ def test_same_pincode_field_is_correct_for_different_pincode(
     response = client.get(_url(service_request.id), headers=auth_header(admin))
     item = next(i for i in response.json()["items"] if i["fullName"] == "Different Pincode")
     assert item["samePincode"] is False
+
+
+# =================================================== PREVIOUSLY DECLINED ===
+
+
+def test_worker_with_no_assignment_history_is_not_previously_declined(
+    client, make_account, make_user_profile, make_federation, make_association,
+    make_service, make_service_request, make_worker, make_worker_skill, auth_header,
+):
+    _, association, service, service_request, admin = _setup_request(
+        make_federation, make_association, make_account, make_user_profile,
+        make_service, make_service_request,
+    )
+    _make_eligible_worker(
+        make_account, make_worker, make_worker_skill,
+        association_id=association.id, service_id=service.id, full_name="No History",
+    )
+
+    response = client.get(_url(service_request.id), headers=auth_header(admin))
+    item = next(i for i in response.json()["items"] if i["fullName"] == "No History")
+    assert item["previouslyDeclined"] is False
+
+
+def test_worker_who_declined_this_request_is_previously_declined(
+    client, make_account, make_user_profile, make_federation, make_association,
+    make_service, make_service_request, make_worker, make_worker_skill,
+    make_assignment, auth_header,
+):
+    """
+    A worker previously offered THIS SAME request and who declined it
+    (putting the request back to MATCHING) must be flagged
+    `previouslyDeclined: true` when offered again -- while still
+    remaining fully eligible (mirrors
+    `test_own_request_does_not_create_false_conflict`, asserting the new
+    field instead of mere presence).
+    """
+    _, association, service, service_request, admin = _setup_request(
+        make_federation, make_association, make_account, make_user_profile,
+        make_service, make_service_request, status=ServiceRequestStatus.MATCHING,
+    )
+    _, worker = _make_eligible_worker(
+        make_account, make_worker, make_worker_skill,
+        association_id=association.id, service_id=service.id, full_name="Declined This One",
+    )
+    make_assignment(
+        request_id=service_request.id,
+        worker_id=worker.id,
+        assigned_by=admin.id,
+        status=AssignmentStatus.DECLINED,
+    )
+
+    response = client.get(_url(service_request.id), headers=auth_header(admin))
+    item = next(i for i in response.json()["items"] if i["fullName"] == "Declined This One")
+    assert item["previouslyDeclined"] is True
+
+
+def test_decline_on_a_different_request_does_not_set_previously_declined(
+    client, make_account, make_user_profile, make_federation, make_association,
+    make_service, make_service_request, make_worker, make_worker_skill,
+    make_assignment, auth_header,
+):
+    """
+    `previouslyDeclined` must never leak across requests -- a DECLINED
+    Assignment on some OTHER request must not flag this worker for the
+    request under test.
+    """
+    _, association, service, service_request, admin = _setup_request(
+        make_federation, make_association, make_account, make_user_profile,
+        make_service, make_service_request,
+    )
+    _, worker = _make_eligible_worker(
+        make_account, make_worker, make_worker_skill,
+        association_id=association.id, service_id=service.id, full_name="Declined Elsewhere",
+    )
+    other_user_account = make_account(role=AccountRole.USER)
+    other_profile = make_user_profile(account_id=other_user_account.id)
+    other_request = make_service_request(
+        user_id=other_profile.id,
+        service_id=service.id,
+        association_id=association.id,
+        requested_date_time=REQUEST_DATETIME + timedelta(days=1),
+    )
+    make_assignment(
+        request_id=other_request.id,
+        worker_id=worker.id,
+        assigned_by=admin.id,
+        status=AssignmentStatus.DECLINED,
+    )
+
+    response = client.get(_url(service_request.id), headers=auth_header(admin))
+    item = next(i for i in response.json()["items"] if i["fullName"] == "Declined Elsewhere")
+    assert item["previouslyDeclined"] is False
+
+
+def test_cancelled_by_worker_on_this_request_does_not_set_previously_declined(
+    client, make_account, make_user_profile, make_federation, make_association,
+    make_service, make_service_request, make_worker, make_worker_skill,
+    make_assignment, auth_header,
+):
+    """
+    Only Assignment.status == DECLINED sets the flag -- a
+    CANCELLED_BY_WORKER row on this same request is a different outcome
+    and must not be conflated with a decline.
+    """
+    _, association, service, service_request, admin = _setup_request(
+        make_federation, make_association, make_account, make_user_profile,
+        make_service, make_service_request, status=ServiceRequestStatus.MATCHING,
+    )
+    _, worker = _make_eligible_worker(
+        make_account, make_worker, make_worker_skill,
+        association_id=association.id, service_id=service.id, full_name="Cancelled Not Declined",
+    )
+    make_assignment(
+        request_id=service_request.id,
+        worker_id=worker.id,
+        assigned_by=admin.id,
+        status=AssignmentStatus.CANCELLED_BY_WORKER,
+    )
+
+    response = client.get(_url(service_request.id), headers=auth_header(admin))
+    item = next(i for i in response.json()["items"] if i["fullName"] == "Cancelled Not Declined")
+    assert item["previouslyDeclined"] is False
+
+
+def test_completed_on_this_request_does_not_set_previously_declined(
+    client, make_account, make_user_profile, make_federation, make_association,
+    make_service, make_service_request, make_worker, make_worker_skill,
+    make_assignment, auth_header,
+):
+    """Same as above, for a COMPLETED row on this same request."""
+    _, association, service, service_request, admin = _setup_request(
+        make_federation, make_association, make_account, make_user_profile,
+        make_service, make_service_request, status=ServiceRequestStatus.MATCHING,
+    )
+    _, worker = _make_eligible_worker(
+        make_account, make_worker, make_worker_skill,
+        association_id=association.id, service_id=service.id, full_name="Completed Not Declined",
+    )
+    make_assignment(
+        request_id=service_request.id,
+        worker_id=worker.id,
+        assigned_by=admin.id,
+        status=AssignmentStatus.COMPLETED,
+    )
+
+    response = client.get(_url(service_request.id), headers=auth_header(admin))
+    item = next(i for i in response.json()["items"] if i["fullName"] == "Completed Not Declined")
+    assert item["previouslyDeclined"] is False
+
+
+def test_previously_declined_does_not_affect_ranking(
+    client, make_account, make_user_profile, make_federation, make_association,
+    make_service, make_service_request, make_worker, make_worker_skill,
+    make_assignment, auth_header,
+):
+    """
+    Two otherwise-identical candidates (same pincode, same workload, same
+    rating, same total_jobs_completed) -- one previously declined this
+    exact request, one with no history. Ranking must still fall through
+    to the existing Worker.id tiebreaker, exactly as if neither had
+    declined -- `previouslyDeclined` must never be inserted as a ranking
+    factor.
+    """
+    _, association, service, service_request, admin = _setup_request(
+        make_federation, make_association, make_account, make_user_profile,
+        make_service, make_service_request, pincode="560001",
+        status=ServiceRequestStatus.MATCHING,
+    )
+    _, worker_a = _make_eligible_worker(
+        make_account, make_worker, make_worker_skill,
+        association_id=association.id, service_id=service.id,
+        full_name="Twin A", pincode="560001", rating=Decimal("4.00"),
+    )
+    _, worker_b = _make_eligible_worker(
+        make_account, make_worker, make_worker_skill,
+        association_id=association.id, service_id=service.id,
+        full_name="Twin B", pincode="560001", rating=Decimal("4.00"),
+    )
+    # Whichever twin sorts first by id, make the OTHER one the one that
+    # previously declined -- so if `previouslyDeclined` wrongly affected
+    # ranking by pushing a decliner down, this would catch it regardless
+    # of which twin happens to have the lower id.
+    expected_first, expected_second = sorted([worker_a.id, worker_b.id], key=str)
+    decliner_id = expected_first
+    make_assignment(
+        request_id=service_request.id,
+        worker_id=decliner_id,
+        assigned_by=admin.id,
+        status=AssignmentStatus.DECLINED,
+    )
+
+    response = client.get(_url(service_request.id), headers=auth_header(admin))
+    ids = [item["workerId"] for item in response.json()["items"]]
+    assert ids == [str(expected_first), str(expected_second)]
 
 
 # ============================================================ PAGINATION ===

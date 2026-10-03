@@ -6,12 +6,18 @@ A `CandidatePublic` is NOT a `WorkerPublic` — it deliberately narrows to
 the fields an Association Admin needs to understand *why* a worker
 appears in the list (see `app/api/associations.py`'s
 `list_candidates_for_request` for the eligibility/ranking rules this
-schema surfaces), and adds two fields that don't exist on `Worker` at
-all: `activeAssignmentCount` and `samePincode`, both computed per-request
-at query time. There is deliberately no opaque numerical "score" field —
-the three ranking factors (`samePincode`, `activeAssignmentCount`,
-`rating`) are exposed directly instead, exactly as the locked spec
-requires.
+schema surfaces), and adds fields that don't exist on `Worker` at all:
+`activeAssignmentCount` and `samePincode`, both computed per-request at
+query time. There is deliberately no opaque numerical "score" field —
+the ranking factors (`samePincode`, `activeAssignmentCount`, `rating`,
+`totalJobsCompleted`) are exposed directly instead, exactly as the
+locked spec requires.
+
+Phase 7B adds `previouslyDeclined` — also computed per-request at query
+time (true iff this Worker has a DECLINED Assignment on THIS exact
+ServiceRequest). It is informational only: it is never an eligibility
+filter and never a ranking factor (see `list_candidates_for_request`'s
+own docstring for the exact query it's derived from).
 """
 
 from decimal import Decimal
@@ -40,6 +46,12 @@ class CandidatePublic(BaseModel):
     total_jobs_completed: int = Field(alias="totalJobsCompleted")
     active_assignment_count: int = Field(alias="activeAssignmentCount")
     same_pincode: bool = Field(alias="samePincode")
+    # Phase 7B: informational only — never an eligibility filter, never a
+    # ranking factor. True iff this Worker has a DECLINED Assignment on
+    # THIS exact ServiceRequest (not on any other request, and not any
+    # other terminal Assignment status such as CANCELLED_BY_WORKER or
+    # COMPLETED).
+    previously_declined: bool = Field(alias="previouslyDeclined")
 
 
 class CandidateListResponse(BaseModel):

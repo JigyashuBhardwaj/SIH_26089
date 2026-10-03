@@ -213,6 +213,21 @@
   border-radius: var(--radius-pill);
 }
 
+/* Phase 7B: informational-only flag — a worker previously declined this
+   exact request. Same badge shape as .samePincodeBadge above, but the
+   existing amber/warning tint (matching WorkerTable.module.css's
+   .badgeAmber) so the two badges are never confused at a glance. */
+.previouslyDeclinedBadge {
+  display: inline-block;
+  margin-left: 8px;
+  background: #fef3e2;
+  color: var(--color-warning);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+}
+
 .assignButton {
   background: var(--color-action-blue);
   color: var(--color-white);

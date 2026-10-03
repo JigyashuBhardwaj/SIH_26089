@@ -54,9 +54,13 @@ async function fetchAllPages<T>(pathForPage: (page: number) => string): Promise<
  * in particular). This is the normalized shape — `rating` is guaranteed
  * to be an actual JS `number` here. Admin-local by design — this does
  * not belong in `shared/types`. Deliberately has no "score" field: the
- * backend exposes the three ranking factors directly (`samePincode`,
- * `activeAssignmentCount`, `rating`) instead of an opaque number, and
- * this interface mirrors that exactly.
+ * backend exposes the ranking factors directly (`samePincode`,
+ * `activeAssignmentCount`, `rating`, `totalJobsCompleted`) instead of an
+ * opaque number, and this interface mirrors that exactly.
+ *
+ * Phase 7B adds `previouslyDeclined` — informational only (never an
+ * eligibility filter, never a ranking factor on the backend); see
+ * `backend/app/api/associations.py`'s `list_candidates_for_request`.
  */
 export interface Candidate {
   workerId: string;
@@ -69,6 +73,7 @@ export interface Candidate {
   totalJobsCompleted: number;
   activeAssignmentCount: number;
   samePincode: boolean;
+  previouslyDeclined: boolean;
 }
 
 /**
@@ -89,6 +94,10 @@ export interface Candidate {
  * boundary conversion, so `candidate.rating` was actually a `string` at
  * runtime, and `candidate.rating.toFixed(2)` in `RequestDetailPage.tsx`
  * threw `TypeError: candidate.rating.toFixed is not a function`.
+ *
+ * `previouslyDeclined` (Phase 7B) is a plain Pydantic `bool`, which
+ * serializes as an ordinary JSON boolean — unlike `rating`, it needs no
+ * wire/display split and is passed straight through in `toCandidate`.
  */
 interface CandidateWire {
   workerId: string;
@@ -101,6 +110,7 @@ interface CandidateWire {
   totalJobsCompleted: number;
   activeAssignmentCount: number;
   samePincode: boolean;
+  previouslyDeclined: boolean;
 }
 
 /**
@@ -124,6 +134,7 @@ function toCandidate(wire: CandidateWire): Candidate {
     totalJobsCompleted: wire.totalJobsCompleted,
     activeAssignmentCount: wire.activeAssignmentCount,
     samePincode: wire.samePincode,
+    previouslyDeclined: wire.previouslyDeclined,
   };
 }
 
